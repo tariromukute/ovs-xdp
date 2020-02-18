@@ -142,7 +142,7 @@ odp_action_len(uint16_t type)
     case OVS_ACTION_ATTR_POP_NSH: return 0;
     case OVS_ACTION_ATTR_CHECK_PKT_LEN: return ATTR_LEN_VARIABLE;
     case OVS_ACTION_ATTR_DROP: return sizeof(uint32_t);
-
+    case OVS_ACTION_ATTR_XDPNSH: return sizeof(uint32_t);
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:
         return ATTR_LEN_INVALID;
@@ -1241,6 +1241,9 @@ format_odp_action(struct ds *ds, const struct nlattr *a,
         break;
     case OVS_ACTION_ATTR_DROP:
         ds_put_cstr(ds, "drop");
+        break;
+    case OVS_ACTION_ATTR_XDPNSH: 
+        ds_put_format(ds, "xdpnsh(%"PRIu32")", nl_attr_get_u32(a));
         break;
     case OVS_ACTION_ATTR_UNSPEC:
     case __OVS_ACTION_ATTR_MAX:

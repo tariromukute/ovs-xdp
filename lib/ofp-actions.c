@@ -262,6 +262,9 @@ enum ofp_raw_action_type {
     /* OF1.5+(29): uint32_t. */
     OFPAT_RAW15_METER,
 
+    /* OF1.0+(30): uint32_t. */
+    OFPAT_RAW_XDPNSH,
+
 /* ## ------------------------- ## */
 /* ## Nicira extension actions. ## */
 /* ## ------------------------- ## */
@@ -373,6 +376,7 @@ enum ofp_raw_action_type {
 
     /* NX1.0+(255): void. */
     NXAST_RAW_DEBUG_RECIRC,
+
 };
 
 /* OpenFlow actions are always a multiple of 8 bytes in length. */
@@ -500,6 +504,7 @@ ofpact_next_flattened(const struct ofpact *ofpact)
     case OFPACT_DECAP:
     case OFPACT_DEC_NSH_TTL:
     case OFPACT_CHECK_PKT_LARGER:
+    case OFPACT_XDPNSH:
         return ofpact_next(ofpact);
 
     case OFPACT_CLONE:
@@ -7620,6 +7625,75 @@ format_GOTO_TABLE(const struct ofpact_goto_table *a,
     ofputil_format_table(a->table_id, fp->table_map, fp->s);
 }
 
+/* Okay, the new stuff! */
+
+/* Encoding the action packet to put on the wire. */
+static void
+encode_XDPNSH(const struct ofpact_xdpnsh *prob,
+                    enum ofp_version ofp_version OVS_UNUSED,
+                    struct ofpbuf *out)
+{
+    uint32_t p = prob->prob;
+
+    put_OFPAT_XDPNSH(out, p);
+}
+
+/* Reversing the process. */
+static enum ofperr
+decode_OFPAT_RAW_XDPNSH(uint32_t prob,
+                            enum ofp_version ofp_version OVS_UNUSED,
+                            struct ofpbuf *out)
+{
+    struct ofpact_xdpnsh *op;
+    op = ofpact_put_XDPNSH(out);
+    op->prob = prob;
+
+    return 0;
+}
+
+/* Helper for below. */
+static char * OVS_WARN_UNUSED_RESULT
+parse_xdpnsh(char *arg, struct ofpbuf *ofpacts)
+{
+    struct ofpact_xdpnsh *probdrop;
+    uint32_t prob;
+    char *error;
+
+    error = str_to_u32(arg, &prob);
+    if (error) return error;
+
+    probdrop = ofpact_put_XDPNSH(ofpacts);
+    probdrop->prob = prob;
+    return NULL;
+}
+
+/* Go from string-formatted args into an action struct.
+e.g. ovs-ofctl add-flow ... actions=probdrop:3000000000,output:"s2-eth0"
+*/
+static char * OVS_WARN_UNUSED_RESULT
+parse_XDPNSH(char *arg, const struct ofpact_parse_params *pp)
+{
+    return parse_xdpnsh(arg, pp->ofpacts);
+}
+
+/* Used when printing info to console. */
+static void
+format_XDPNSH(const struct ofpact_xdpnsh *a,
+            const struct ofpact_format_params *fp)
+{
+    /* Feel free to use e.g. colors.param,
+    colors.end around parameter names */
+    ds_put_format(fp->s, "xdpnsh:%"PRIu32, a->prob);
+}
+
+static enum ofperr
+check_XDPNSH(const struct ofpact_xdpnsh *a OVS_UNUSED,
+                const struct ofpact_check_params *cp OVS_UNUSED)
+{
+    /* My method needs no checking. Probably. */
+    return 0;
+}
+
 static enum ofperr
 check_GOTO_TABLE(const struct ofpact_goto_table *a,
                  const struct ofpact_check_params *cp)
@@ -7868,6 +7942,7 @@ action_set_classify(const struct ofpact *a)
     case OFPACT_DEBUG_RECIRC:
     case OFPACT_DEBUG_SLOW:
     case OFPACT_CHECK_PKT_LARGER:
+    case OFPACT_XDPNSH:
         return ACTION_SLOT_INVALID;
 
     default:
@@ -8071,6 +8146,7 @@ ovs_instruction_type_from_ofpact_type(enum ofpact_type type,
     case OFPACT_DECAP:
     case OFPACT_DEC_NSH_TTL:
     case OFPACT_CHECK_PKT_LARGER:
+    case OFPACT_XDPNSH:
     default:
         return OVSINST_OFPIT11_APPLY_ACTIONS;
     }
@@ -8982,6 +9058,7 @@ ofpact_outputs_to_port(const struct ofpact *ofpact, ofp_port_t port)
     case OFPACT_DECAP:
     case OFPACT_DEC_NSH_TTL:
     case OFPACT_CHECK_PKT_LARGER:
+    case OFPACT_XDPNSH:
     default:
         return false;
     }

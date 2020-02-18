@@ -3290,6 +3290,14 @@ compose_ipfix_action(struct xlate_ctx *ctx, odp_port_t output_odp_port)
                           &cookie, tunnel_out_port, false);
 }
 
+static void
+compose_xdpnsh_action(struct xlate_ctx *ctx, struct ofpact_xdpnsh *op)
+{
+    uint32_t prob = op->prob;
+
+    nl_msg_put_u32(ctx->odp_actions, OVS_ACTION_ATTR_XDPNSH, prob);
+}
+
 /* Fix "sample" action according to data collected while composing ODP actions,
  * as described in compose_sflow_action().
  *
@@ -5672,6 +5680,7 @@ reversible_actions(const struct ofpact *ofpacts, size_t ofpacts_len)
         case OFPACT_ENCAP:
         case OFPACT_DECAP:
         case OFPACT_DEC_NSH_TTL:
+        case OFPACT_XDPNSH:
             return false;
         }
     }
@@ -5972,6 +5981,7 @@ freeze_unroll_actions(const struct ofpact *a, const struct ofpact *end,
         case OFPACT_CT_CLEAR:
         case OFPACT_NAT:
         case OFPACT_CHECK_PKT_LARGER:
+        case OFPACT_XDPNSH:
             /* These may not generate PACKET INs. */
             break;
 
@@ -6632,6 +6642,7 @@ recirc_for_mpls(const struct ofpact *a, struct xlate_ctx *ctx)
     case OFPACT_WRITE_METADATA:
     case OFPACT_GOTO_TABLE:
     case OFPACT_CHECK_PKT_LARGER:
+    case OFPACT_XDPNSH:
     default:
         break;
     }
@@ -7102,6 +7113,11 @@ do_xlate_actions(const struct ofpact *ofpacts, size_t ofpacts_len,
                                    remaining_acts, remaining_acts_len);
             break;
         }
+
+        case OFPACT_XDPNSH:
+            compose_xdpnsh_action(ctx, ofpact_get_XDPNSH(a));
+            break;
+                
         }
 
         /* Check if need to store this and the remaining actions for later

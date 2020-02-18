@@ -1269,6 +1269,7 @@ dpif_execute_helper_cb(void *aux_, struct dp_packet_batch *packets_,
     case OVS_ACTION_ATTR_CHECK_PKT_LEN:
     case OVS_ACTION_ATTR_DROP:
     case __OVS_ACTION_ATTR_MAX:
+    case OVS_ACTION_ATTR_XDPNSH:
         OVS_NOT_REACHED();
     }
     dp_packet_delete_batch(packets_, should_steal);

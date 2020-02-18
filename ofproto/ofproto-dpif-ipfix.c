@@ -3018,6 +3018,7 @@ dpif_ipfix_read_actions(const struct flow *flow,
         case OVS_ACTION_ATTR_UNSPEC:
         case OVS_ACTION_ATTR_DROP:
         case __OVS_ACTION_ATTR_MAX:
+        case OVS_ACTION_ATTR_XDPNSH:
         default:
             break;
         }

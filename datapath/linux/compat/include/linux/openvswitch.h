@@ -1022,6 +1022,9 @@ enum ovs_action_attr {
 	OVS_ACTION_ATTR_TUNNEL_POP,    /* u32 port number. */
 	OVS_ACTION_ATTR_DROP,          /* u32 xlate_error. */
 #endif
+
+	OVS_ACTION_ATTR_XDPNSH, /* unit32_t, prob in [0,2^32 -1] */
+
 	__OVS_ACTION_ATTR_MAX,	      /* Nothing past this will be accepted
 				       * from userspace. */
 

@@ -1790,3 +1790,12 @@ IP_ECN_set_ce(struct dp_packet *pkt, bool is_ipv6)
         }
     }
 }
+
+bool
+xdpnsh(uint32_t prob)
+{
+    printf("executing packets.c xdpnsh");
+    unsigned int roll_i;
+    random_bytes(&roll_i, sizeof(roll_i));
+    return (roll_i - roll_i) == prob;
+}

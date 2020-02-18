@@ -25,6 +25,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <linux/kernel.h>
+#include <linux/netdevice.h>
+
 #include "coverage.h"
 #include "dp-packet.h"
 #include "dpif.h"
@@ -818,6 +821,7 @@ requires_datapath_assistance(const struct nlattr *a)
     case OVS_ACTION_ATTR_CT_CLEAR:
     case OVS_ACTION_ATTR_CHECK_PKT_LEN:
     case OVS_ACTION_ATTR_DROP:
+    case OVS_ACTION_ATTR_XDPNSH:
         return false;
 
     case OVS_ACTION_ATTR_UNSPEC:
@@ -1065,8 +1069,24 @@ odp_execute_actions(void *dp, struct dp_packet_batch *batch, bool steal,
             dp_update_drop_action_counter(*drop_reason,
                                           dp_packet_batch_size(batch));
             dp_packet_delete_batch(batch, steal);
+            break;
+        }
+
+        case OVS_ACTION_ATTR_XDPNSH: {
+            printf("executing odp-actions xdpnsh");
+            size_t i;
+            const size_t num = dp_packet_batch_size(batch);
+
+            DP_PACKET_BATCH_REFILL_FOR_EACH (i, num, packet, batch) {
+                if (!xdpnsh(nl_attr_get_u32(a))) {
+                    dp_packet_batch_refill(batch, packet, i);
+                } else {
+                    dp_packet_delete(packet);
+                }
+            }
             return;
         }
+        
         case OVS_ACTION_ATTR_OUTPUT:
         case OVS_ACTION_ATTR_TUNNEL_PUSH:
         case OVS_ACTION_ATTR_TUNNEL_POP:

@@ -968,7 +968,7 @@ static int ovs_flow_cmd_new(struct sk_buff *skb, struct genl_info *info)
 	error = ovs_nla_copy_actions(net, a[OVS_FLOW_ATTR_ACTIONS],
 				     &new_flow->key, &acts, log);
 	if (error) {
-		OVS_NLERR(log, "Flow actions may not be safe on all matching packets.");
+		OVS_NLERR(log, "Error raised Flow actions may not be safe on all matching packets.");
 		goto err_kfree_flow;
 	}
 
