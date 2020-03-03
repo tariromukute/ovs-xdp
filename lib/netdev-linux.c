@@ -241,6 +241,7 @@ enum {
     VALID_DRVINFO           = 1 << 6,
     VALID_FEATURES          = 1 << 7,
     VALID_NUMA_ID           = 1 << 8,
+    // TODO: Add the relevant enum for xdp filters
 };
 
 /* Use one for the packet buffer and another for the aux buffer to receive
@@ -3607,6 +3608,27 @@ const struct netdev_class netdev_afxdp_class = {
 };
 #endif
 
+/* ========= ADDED ========== */
+const struct netdev_class netdev_xdp_class = {
+    NETDEV_LINUX_CLASS_COMMON,
+    .type = "xdp",
+    .is_pmd = true,
+    .init = netdev_xdp_init,
+    .construct = netdev_xdp_construct,
+    .destruct = netdev_xdp_destruct,
+    .get_stats = netdev_xdp_get_stats,
+    .get_custom_stats = netdev_xdp_get_custom_stats,
+    .get_status = netdev_linux_get_status,
+    .set_config = netdev_xdp_set_config,
+    .get_config = netdev_xdp_get_config,
+    .reconfigure = netdev_xdp_reconfigure,
+    .get_numa_id = netdev_linux_get_numa_id,
+    .send = netdev_xdp_batch_send,
+    .rxq_construct = netdev_xdp_rxq_construct,
+    .rxq_destruct = netdev_xdp_rxq_destruct,
+    .rxq_recv = netdev_xdp_rxq_recv,
+    .set_xdp = netdev_xdp_set_prog
+}
 
 #define CODEL_N_QUEUES 0x0000
 

@@ -301,6 +301,35 @@ AC_DEFUN([OVS_CHECK_LINUX_AF_XDP], [
   AM_CONDITIONAL([HAVE_AF_XDP], test "$AF_XDP_ENABLE" = true)
 ])
 
+dnl OVS_CHECK_LINUX_XDP
+dnl
+dnl Check both Linux kernel XDP and libbpf support
+AC_DEFUN([OVS_CHECK_LINUX_XDP], [
+  AC_ARG_ENABLE([afxdp],
+                [AC_HELP_STRING([--enable-xdp], [Enable XDP support])],
+                [], [enable_xdp=no])
+  AC_MSG_CHECKING([whether XDP is enabled])
+  if test "$enable_xdp" != yes; then
+    AC_MSG_RESULT([no])
+    XDP_ENABLE=false
+  else
+    AC_MSG_RESULT([yes])
+    XDP_ENABLE=true
+
+    AC_CHECK_HEADER([bpf/libbpf.h], [],
+      [AC_MSG_ERROR([unable to find bpf/libbpf.h for AF_XDP support])])
+
+    AC_CHECK_HEADER([linux/if_xdp.h], [],
+      [AC_MSG_ERROR([unable to find linux/if_xdp.h for AF_XDP support])])
+
+    AC_DEFINE([HAVE_XDP], [1],
+              [Define to 1 if AF_XDP support is available and enabled.])
+    LIBBPF_LDADD=" -lbpf -lelf"
+    AC_SUBST([LIBBPF_LDADD])
+  fi
+  AM_CONDITIONAL([HAVE_XDP], test "$XDP_ENABLE" = true)
+])
+
 dnl OVS_CHECK_DPDK
 dnl
 dnl Configure DPDK source tree

@@ -425,6 +425,13 @@ lib_libopenvswitch_la_SOURCES += \
 	lib/netdev-afxdp.h
 endif
 
+# ==== ADDED =====
+if HAVE_XDP
+lib_libopenvswitch_la_SOURCES += \
+	lib/netdev-xdp.c \
+	lib/netdev-xdp.h
+endif
+
 if DPDK_NETDEV
 lib_libopenvswitch_la_SOURCES += \
 	lib/dpdk.c \
