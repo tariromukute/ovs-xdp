@@ -1,5 +1,5 @@
 
-#include <stdbool.h>
+#include "netdev-xdp.h"
 
 int netdev_xdp_rxq_construct(struct netdev_rxq *rxq_)
 {

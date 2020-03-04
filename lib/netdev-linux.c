@@ -3609,6 +3609,7 @@ const struct netdev_class netdev_afxdp_class = {
 #endif
 
 /* ========= ADDED ========== */
+#ifdef HAVE_XDP
 const struct netdev_class netdev_xdp_class = {
     NETDEV_LINUX_CLASS_COMMON,
     .type = "xdp",
@@ -3629,6 +3630,8 @@ const struct netdev_class netdev_xdp_class = {
     .rxq_recv = netdev_xdp_rxq_recv,
     .set_xdp = netdev_xdp_set_prog
 }
+#endif
+
 
 #define CODEL_N_QUEUES 0x0000
 
