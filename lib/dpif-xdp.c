@@ -81,6 +81,8 @@ static struct shash dp_xdps OVS_GUARDED_BY(dp_netdev_mutex)
 struct dp_xdp {
     const struct dpif_class *const class;
     const char *const name;
+    struct ovs_refcount ref_cnt;
+    atomic_flag destroyed;
 
     /* Ports.
      *
@@ -239,6 +241,108 @@ get_dp_xdp(const struct dpif *dpif)
     return dpif_xdp_cast(dpif)->dp;
 }
 
+static void
+port_destroy(struct dp_xdp_port *port)
+{
+    /* TODO: Might remove some of the port attributes
+        so will need to remove some of the code here */
+    if (!port) {
+        return;
+    }
+
+    netdev_close(port->netdev);
+    netdev_restore_flags(port->sf);
+
+    for (unsigned i = 0; i < port->n_rxq; i++) {
+        netdev_rxq_close(port->rxqs[i].rx);
+    }
+    ovs_mutex_destroy(&port->txq_used_mutex);
+    free(port->rxq_affinity_list);
+    free(port->txq_used);
+    free(port->rxqs);
+    free(port->type);
+    free(port);
+}
+
+static void
+do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
+    OVS_REQUIRES(dp->port_mutex)
+{
+    hmap_remove(&dp->ports, &port->node);
+    seq_change(dp->port_seq);
+
+    // TODO: Remove the XDP program loaded on port
+
+    port_destroy(port);
+}
+
+/* Requires dp_xdp_mutex so that we can't get a new reference to 'dp'
+ * through the 'dp_xdps' shash while freeing 'dp'. */
+static void
+dp_xdp_free(struct dp_xdp *dp)
+    OVS_REQUIRES(dp_xdp_mutex)
+{
+    struct dp_xdp_port *port, *next;
+
+    shash_find_and_delete(&dp_xdps, dp->name);
+
+    ovs_mutex_lock(&dp->port_mutex);
+    HMAP_FOR_EACH_SAFE (port, next, node, &dp->ports) {
+        do_del_port(dp, port);
+    }
+    ovs_mutex_unlock(&dp->port_mutex);
+
+    dp_netdev_destroy_all_pmds(dp, true);
+    cmap_destroy(&dp->poll_threads);
+
+    ovs_mutex_destroy(&dp->tx_qid_pool_mutex);
+    id_pool_destroy(dp->tx_qid_pool);
+
+    ovs_mutex_destroy(&dp->non_pmd_mutex);
+    ovsthread_key_delete(dp->per_pmd_key);
+
+    conntrack_destroy(dp->conntrack);
+
+
+    seq_destroy(dp->reconfigure_seq);
+
+    seq_destroy(dp->port_seq);
+    hmap_destroy(&dp->ports);
+    ovs_mutex_destroy(&dp->port_mutex);
+
+    /* Upcalls must be disabled at this point */
+    dp_netdev_destroy_upcall_lock(dp);
+
+    int i;
+
+    for (i = 0; i < MAX_METERS; ++i) {
+        meter_lock(dp, i);
+        dp_delete_meter(dp, i);
+        meter_unlock(dp, i);
+    }
+    for (i = 0; i < N_METER_LOCKS; ++i) {
+        ovs_mutex_destroy(&dp->meter_locks[i]);
+    }
+
+    free(dp->pmd_cmask);
+    free(CONST_CAST(char *, dp->name));
+    free(dp);
+}
+
+static void
+dp_xdp_unref(struct dp_netdev *dp)
+{
+    if (dp) {
+        /* Take dp_netdev_mutex so that, if dp->ref_cnt falls to zero, we can't
+         * get a new reference to 'dp' through the 'dp_netdevs' shash. */
+        ovs_mutex_lock(&dp_xdp_mutex);
+        if (ovs_refcount_unref_relaxed(&dp->ref_cnt) == 1) {
+            dp_xdp_free(dp);
+        }
+        ovs_mutex_unlock(&dp_xdp_mutex);
+    }
+}
+
 /* Provider functions */
 static int
 dpif_xdp_init()
@@ -282,24 +386,38 @@ int (*dpif_xdp_open)(const struct dpif_class *dpif_class,
 
 }
 
-void (*dpif_xdp_close)(struct dpif *dpif)
+static void
+dpif_xdp_close(struct dpif *dpif)
 {
+    struct dp_xdp *dp = get_dp_xdp(dpif);
 
+    dp_xdp_unref(dp);
+    free(dpif);
 }
 
-int (*dpif_xdp_destroy)(struct dpif *dpif)
+static int
+dpif_xdp_destroy(struct dpif *dpif)
 {
+    struct dp_nxdp *dp = get_dp_xdp(dpif);
 
+    if (!atomic_flag_test_and_set(&dp->destroyed)) {
+        if (ovs_refcount_unref_relaxed(&dp->ref_cnt) == 1) {
+            /* Can't happen: 'dpif' still owns a reference to 'dp'. */
+            OVS_NOT_REACHED();
+        }
+    }
+
+    return 0;
 }
 
-bool (*dpif_xdp_run)(struct dpif *dpif)
+static bool
+dpif_xdp_run(struct dpif *dpif)
 {
-
-}
-
-void (*dpif_xdp_wait)(struct dpif *dpif)
-{
-
+    /* TODO: check if this is needed for now returning
+       false indicating that there is no periodic work 
+       needed to be done. */
+    
+    return false;
 }
 
 static int
@@ -314,11 +432,6 @@ dpif_xdp_get_stats(const struct dpif *dpif, struct dpif_dp_stats *stats)
     }
 
     return 0;
-}
-
-int (*dpif_xdp_set_features)(struct dpif *dpif, uint32_t user_features)
-{
-
 }
 
 static int
@@ -710,9 +823,9 @@ const struct dpif_class dpif_xdp_class = {
     .close = dpif_xdp_close,
     .destroy = dpif_xdp_destroy,
     .run = dpif_xdp_run,
-    .wait = dpif_xdp_wait,
+    .wait = NULL,
     .get_stats = dpif_xdp_get_stats,
-    .set_features = dpif_xdp_set_features,
+    .set_features = NULL, // don't think we need this
     .port_add = dpif_xdp_port_add,
     .port_del = dpif_xdp_port_del,
     .port_set_config = dpif_xdp_port_set_config,
