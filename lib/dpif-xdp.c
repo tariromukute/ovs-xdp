@@ -78,6 +78,16 @@ static struct ovs_mutex dp_xdp_mutex = OVS_MUTEX_INITIALIZER;
 static struct shash dp_xdps OVS_GUARDED_BY(dp_netdev_mutex)
     = SHASH_INITIALIZER(&dp_xdps);
 
+/* An AF_XDP channel to communicate between the kernel and userspace */
+struct afxdp_channel {
+    /* TODO: define channel */
+    int count; /* Num of ports assign to channel's upcall_id */
+}
+
+struct xdp_handler {
+    /* TODO: define handler */
+}
+
 struct dp_xdp {
     const struct dpif_class *const class;
     const char *const name;
@@ -96,6 +106,15 @@ struct dp_xdp {
     
     /* Stores all the 'struct dp_xdp_entry_points's (where hooks/progs are attached) */
     struct cmap entry_points;
+
+    /* Handlers */
+    struct fat_rwlock upcall_lock;
+    uint32_t n_handlers;            /* Num of upcall handlers. */
+    struct xdp_handler *handlers;   /* Array of handlers */
+
+    /* Upcall channels. */
+    int n_channels;
+    struct afxdp_channel *channels; /* Array of channels */
 
 }
 
@@ -118,11 +137,9 @@ struct dp_xdp_port {
     char *rxq_affinity_list;    /* Requested affinity of rx queues. */
     
     /* TODO: check if we need a lock for upcalls */
-    /* The upcall id, using the id of the afxdp 
-       this corresponds to one of the entry points.
-       Possibly where each port is an entry point, this
-       will have a 1-to-1 match with the dp_xdp_entry_point*/
-    const uint32_t *upcall_pid;
+    /* The upcall id, using the id of the afxdp that is held or part
+       of a channel in the dp. */
+    const uint32_t upcall_pid; /* The upcall id, using the id of the afxdp */
 
     /* TODO: consider putting a flag to check port is entry point
        the adapt it in the necessary methods like:
@@ -182,7 +199,6 @@ struct dp_xdp_entry_point {
     struct bpf_map flow_table_cache; /* Cache of flow table, for individual interface */
     struct bpf_map stats; /* Keeps track of the entry point's performance */
 
-    const uint32_t *upcall_pid; /* The upcall id, using the id of the afxdp */
 };
 
 struct dp_xdp_port_state {
@@ -222,11 +238,103 @@ struct dp_xdp_actions {
     unsigned int size;          /* Size of 'actions', in bytes. */
     struct nlattr actions[];    /* Sequence of OVS_ACTION_ATTR_* attributes. */
 };
-/** ====================== COMMON ========================================== 
- * The section contains the 'util' function that are common for dpif-netdev
- * and this file. Might/should consider reusing them from dpif-netdev in 
- * future
-*/
+
+struct dpif_netdev_flow_dump_thread {
+    struct dpif_flow_dump_thread up;
+    struct dpif_xdp_flow_dump *dump;
+
+    /* TODO: confirm if this is all we need */
+
+    /* (Key/Mask/Actions) Buffers for netdev dumping */
+    struct odputil_keybuf keybuf[FLOW_DUMP_MAX_BATCH];
+    struct odputil_keybuf maskbuf[FLOW_DUMP_MAX_BATCH];
+    struct odputil_keybuf actbuf[FLOW_DUMP_MAX_BATCH];
+};
+
+static int get_port_by_name(struct dp_xdp *dp,
+                 const char *devname, struct dp_xdp_port **portp)
+    OVS_REQUIRES(dp->port_mutex);
+static void answer_port_query(const struct dp_xdp_port *port,
+                  struct dpif_port *dpif_port);
+static uint32_t hash_port_no(odp_port_t port_no);                  
+static struct dp_xdp_port * dp_xdp_lookup_port(const struct dp_xdp *dp, odp_port_t port_no)
+    OVS_REQUIRES(dp->port_mutex);
+static int get_port_by_number(struct dp_xdp *dp,
+                   odp_port_t port_no, struct dp_xdp_port **portp)
+    OVS_REQUIRES(dp->port_mutex);
+static struct dpif_xdp * dpif_xdp_cast(const struct dpif *dpif);
+static struct dp_xdp * get_dp_xdp(const struct dpif *dpif);
+static void port_destroy(struct dp_xdp_port *port);
+static void do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
+    OVS_REQUIRES(dp->port_mutex);
+static int port_add_channel(struct dp_xdp *dp, odp_port_t port_no);
+static int do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
+            odp_port_t port_no);
+    OVS_REQUIRES(dp->port_mutex);
+static void afxdp_channel_close(struct afxdp_channel *channel);
+static void destroy_all_channels(struct dp_xdp *dp)
+    OVS_REQ_WRLOCK(dp->upcall_lock);
+static int dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
+    OVS_REQ_WRLOCK(dp->upcall_lock);
+static void dp_xdp_free(struct dp_xdp *dp)
+    OVS_REQUIRES(dp_xdp_mutex);
+static void dp_xdp_unref(struct dp_netdev *dp);
+static struct dpif * create_dpif_xdp(struct dp_xdp *dp);
+static int dp_xdp_handler_init(struct xdp_handler *handler);
+static void dp_xdp_handler_uninit(struct xdp_handler *handler);
+static int dp_xdp_channels_create(struct dp_xdp *dp);
+static int create_dp_xdp(const char *name, const struct dpif_class *class,
+                 struct dp_xdp **dpp)
+    OVS_REQUIRES(dp_xdp_mutex);
+static int dpif_xdp_flow_from_nlattrs(const struct nlattr *key, uint32_t key_len,
+                              struct flow *flow, bool probe);
+static int dpif_xdp_mask_from_nlattrs(const struct nlattr *key, uint32_t key_len,
+                              const struct nlattr *mask_key,
+                              uint32_t mask_key_len, const struct flow *flow,
+                              struct flow_wildcards *wc, bool probe);
+static void dp_xdp_ep_remove_flow(struct dp_xdp_entry_point *ep,
+                      struct dp_xdp_flow *flow);
+static void dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep);
+static struct dp_xdp_flow * dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
+                          const struct xdp_flow_key *key,
+                          int *lookup_num_p);
+static struct dp_xdp_flow * dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
+                        const ovs_u128 *ufidp, const struct nlattr *key,
+                        size_t key_len);
+static struct dpif_xdp_flow_dump * dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump);
+static struct dpif_xdp_flow_dump_thread * dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread);
+static void dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
+                        odp_port_t port_no);
+static void dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep);
+static bool dp_xdp_ep_try_ref(struct dp_xdp_entry_point *ep);
+static void dp_xdp_ep_unref(struct dp_xdp_entry_point *ep);
+static void dp_xdp_actions_free(struct dp_xdp_actions *actions);
+struct dp_xdp_actions * dp_xdp_actions_create(const struct nlattr *actions, size_t size);
+struct dp_xdp_actions * dp_xdp_flow_get_actions(const struct dp_xdp_flow *flow);
+static struct dp_xdp_entry_point * dp_xdp_get_ep(struct dp_xdp *dp, odp_port_t port_no);
+static struct dp_netdev_pmd_thread * dp_xdp_ep_get_next(struct dp_netdev *dp, struct cmap_position *pos);
+static void dp_xdp_flow_to_dpif_flow(const struct dp_netdev *dp,
+                            const struct dp_xdp_flow *xdp_flow,
+                            struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
+                            struct dpif_flow *flow, bool terse);
+static void dpif_xdp_flow_get_stats(const struct dp_xdp_flow *flow,
+                            struct dpif_flow_stats *stats);
+static int flow_put_on_ep(struct dp_xdp_entry_point *ep,
+                struct xdp_flow_key *key,
+                struct match *match,
+                ovs_u128 *ufid,
+                const struct dpif_flow_put *put,
+                struct dpif_flow_stats *stats);
+static int dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put);
+static int flow_del_on_ep(struct dp_xdp_entry_point *ep,
+                struct dpif_flow_stats *stats,
+                const struct dpif_flow_del *del);
+static int dpif_xdp_flow_del(struct dpif *dpif, const struct dpif_flow_put *del);
+static int dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
+    OVS_NO_THREAD_SAFETY_ANALYSIS;
+static int dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get);
+static int afxdp_channel_read(struct afxdp_channel *channel, struct ofpbuf *buffer);
+static int recv_from_channel(struct xdp_handler *handler, struct dpif_upcall *upcall, struct ofbuf *buf);
 
 // IMPORTANT: port type not common (dp_xdp_port vs dp_netdev_port)
 static int
@@ -258,6 +366,12 @@ answer_port_query(const struct dp_xdp_port *port,
     dpif_port->port_no = port->port_no;
 }
 
+static uint32_t
+hash_port_no(odp_port_t port_no)
+{
+    return hash_int(odp_to_u32(port_no), 0);
+}
+
 static struct dp_xdp_port *
 dp_xdp_lookup_port(const struct dp_xdp *dp, odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex)
@@ -286,8 +400,6 @@ get_port_by_number(struct dp_xdp *dp,
         return *portp ? 0 : ENODEV;
     }
 }
-
-/** ====================== COMMON ========================================== */
 
 /* Returns true if 'dpif' is a netdev or dummy dpif, false otherwise. */
 static struct dpif_xdp *
@@ -330,12 +442,117 @@ static void
 do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
     OVS_REQUIRES(dp->port_mutex)
 {
-    hmap_remove(&dp->ports, &port->node);
+    struct dp_xdp_entry_point *ep;
+
+    /* Remove ep */
+    ep = dp_xdp_get_ep(dp, port->port_no);
+    dp_xdp_destroy_ep(ep);
+    
+    hmap_remove(&dp->ports,&port->node);
     seq_change(dp->port_seq);
 
-    // TODO: Remove the XDP program loaded on port
-
+    /* TODO: Remove channel if nolonger needed */
     port_destroy(port);
+}
+
+static int
+port_add_channel(struct dp_xdp *dp, odp_port_t port_no)
+{
+    struct afxdp_channel *channel;
+    int i;
+    int error;
+    for (i = 0; i < dp->n_channels; i++)
+    {
+        if (channel && channel->count > dp->channels[i].count) {
+            continue;
+        }
+        channel = &dp->channels[i];
+    }
+    
+    /* TODO: assign the pid from channel to the port */
+
+    return error;
+}
+
+static int
+do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
+            odp_port_t port_no)
+    OVS_REQUIRES(dp->port_mutex);
+{
+    struct dp_xdp_port *port;
+    struct dp_xdp_entry_point *ep;
+    uint32_t upcall_pids = 0;
+    int error;
+    
+    if (!get_port_by_name(dp, devname, &port)) {
+        return EEXIST;
+    }
+
+    error = port_create(devname, type, port_no, &port);
+    if (error) {
+        return error;
+    }
+
+    hmap_insert(&dp->ports, &port->node, hash_port_no(port_no));
+    seq_change(dp->port_seq);
+
+    // configure ep
+    dp_xdp_configure_ep(ep, dp, port_no);
+
+    error = port_add_channel(dp, port_no);
+
+    if (error) {
+        do_del_port(dp, port);
+    }
+
+    return error;
+}
+
+static void
+afxdp_channel_close(struct afxdp_channel *channel)
+{
+    /* TODO: close channel */
+}
+
+static void
+destroy_all_channels(struct dp_xdp *dp)
+    OVS_REQ_WRLOCK(dp->upcall_lock)
+{
+    unsigned int i;
+    /* TODO: implement methods */
+
+    /* TODO: need to turn off upcalls on ep since they may
+       not necessarily be destroyed as well. We can assign
+       up_callid of 0 */
+
+    /* TODO: close channels */
+    // for (i = 0; i < dp->n_channels; i++) {
+    //     struct afxdp_channel *channel = &dp->channels[i];
+        
+    //     afxdp_channel_close(channel);
+    // }
+
+    /* TODO: uninitialise handlers */
+
+    /* TODO: free channels and handlers arrays */
+    // free(dp->channels);
+    // free(dp->handlers);
+    // dp->handlers = NULL;
+    // dp->channels = NULL;
+    // dp->n_channels = 0;
+    // dp->n_handlers = 0;
+
+}
+
+static int
+dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
+    OVS_REQ_WRLOCK(dp->upcall_lock)
+{
+    int error = 0;
+
+    /* TODO: implement the method */
+    
+    return error;
 }
 
 /* Requires dp_xdp_mutex so that we can't get a new reference to 'dp'
@@ -364,6 +581,13 @@ dp_xdp_free(struct dp_xdp *dp)
     seq_destroy(dp->port_seq);
     hmap_destroy(&dp->ports);
     ovs_mutex_destroy(&dp->port_mutex);
+
+    /* Destroy upcall channels */
+    fat_rwlock_wrlock(&dp->upcall_lock);
+    destroy_all_channels(dp);               /* It also uninitialises handlers */
+    fat_rwlock_unlock(&dp->upcall_lock);
+
+    fat_rwlock_destroy(&dp->upcall_lock);
 
     /* TODO: Destroy the upcall queues if necessary or any */
     
@@ -402,6 +626,47 @@ create_dpif_xdp(struct dp_xdp *dp)
 }
 
 static int
+dp_xdp_handler_init(struct xdp_handler *handler)
+{
+    int error = 0;
+
+    /* TODO: initialise handler */
+
+    return error;
+}
+
+static void
+dp_xdp_handler_uninit(struct xdp_handler *handler)
+{
+    /* TODO: uninitialise handler */
+}
+
+static int
+dp_xdp_channels_create(struct dp_xdp *dp) 
+{
+    int i;
+    int error = 0;
+    /* TODO: create channels */
+    for ( i = 0; i < dp->n_channels ; i++)
+    {
+        struct afxdp_channel *channel = &dp->channels[i];
+
+        /* TODO: initialise channel */
+        /* TODO: open channel */
+        if (error) {
+            goto out;
+        }
+    }
+
+out:
+    if (error) {
+        destroy_all_channels(dp);
+    }
+
+    return error;
+}
+
+static int
 create_dp_xdp(const char *name, const struct dpif_class *class,
                  struct dp_xdp **dpp)
     OVS_REQUIRES(dp_xdp_mutex)
@@ -421,6 +686,16 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
     hmap_init(&dp->ports);
     dp->port_seq = seq_create();
 
+    fat_rwlock_init(&dp->upcall_lock);
+    
+    /* Initialse channels */
+    /* TODO: initialise n_channels */
+    dp->n_channels = 1;
+
+    error = dp_xdp_channels_create(dp);
+    if (error) {
+        goto out;
+    }
 
     cmap_init(&dp->entry_points);
 
@@ -428,11 +703,12 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
        or preferably use the default host to bridge port (not sure if
        it's attached by default) */
 
-    /* TODO: Assign the on the entry point upcall_id, will need to 
-       create the respective queue(s) */
+    /* TODO: Assign the upcall_id to the entry point(s) should derive 
+       these from the channels */
 
+out:
     if (error) {
-        dp_netdev_free(dp);
+        dp_xdp_free(dp);
         return error;
     }
 
@@ -526,7 +802,7 @@ dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread)
     return CONTAINER_OF(thread, struct dpif_xdp_flow_dump_thread, up);
 }
 
-/* Configures the 'pmd' based on the input argument. */
+/* Configures the 'ep' based on the input argument. */
 static void
 dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
                         odp_port_t port_no)
@@ -984,6 +1260,32 @@ out:
     return error;
 }
 
+static int
+afxdp_channel_read(struct afxdp_channel *channel, struct ofpbuf *buffer)
+{
+    int error = 0;
+    
+    /* TODO: implement method */
+
+    return error;
+}
+
+static int
+recv_from_channel(struct xdp_handler *handler, struct dpif_upcall *upcall, struct ofbuf *buf) 
+{
+    struct afxdp_channel *channel;
+    int error = 0;
+
+    /* TODO: implement method */
+
+    /* TODO: read information from the afxdp channel */
+    error = afxdp_channel_read(channel, buf);
+
+    /* TODO: check the type of upcall and set the data */
+
+    return error;
+}
+
 /* Provider functions */
 static int
 dpif_xdp_init()
@@ -1041,7 +1343,7 @@ dpif_xdp_open(const struct dpif_class *dpif_class,
     }
 
     ovs_mutex_lock(&dp_xdp_mutex);
-    dp = shash_find_data(&dp_netdevs, name);
+    dp = shash_find_data(&dp_xdps, name);
     if (!dp) {
         error = create ? create_dp_xdp(name, dpif_class, &dp) : ENODEV;
     } else {
@@ -1108,7 +1410,7 @@ dpif_xdp_get_stats(const struct dpif *dpif, struct dpif_dp_stats *stats)
 
 static int
 dpif_xdp_port_add(struct dpif *dpif, struct netdev *netdev,
-                    odp_port_t *port_no)
+                    odp_port_t *port_nop)
 {
     struct dp_xdp *dp = get_dp_xdp(dpif);
     char namebuf[NETDEV_VPORT_NAME_BUFSIZE];
@@ -1142,9 +1444,21 @@ unlock:
     return error;
 }
 
-int (*dpif_xdp_port_del)(struct dpif *dpif, odp_port_t port_no)
+static int
+dpif_xdp_port_del(struct dpif *dpif, odp_port_t port_no)
 {
+    struct dp_xdp *dp = get_dp_xdp(dpif);
+    struct dp_xdp_port *port;
+    int error;
 
+    ovs_mutex_lock(&dp->port_mutex);
+    error = get_port_by_number(dp, port_no, &port);
+    if (!error) {
+        do_del_port(dp, port);
+    }
+    ovs_mutex_unlock(&dp->port_mutex);
+
+    return error;
 }
 
 static int
@@ -1338,18 +1652,6 @@ dpif_xdp_flow_dump_destroy(struct dpif_flow_dump *dump_)
     return 0;
 }
 
-struct dpif_netdev_flow_dump_thread {
-    struct dpif_flow_dump_thread up;
-    struct dpif_xdp_flow_dump *dump;
-
-    /* TODO: confirm if this is all we need */
-
-    /* (Key/Mask/Actions) Buffers for netdev dumping */
-    struct odputil_keybuf keybuf[FLOW_DUMP_MAX_BATCH];
-    struct odputil_keybuf maskbuf[FLOW_DUMP_MAX_BATCH];
-    struct odputil_keybuf actbuf[FLOW_DUMP_MAX_BATCH];
-};
-
 static struct dpif_flow_dump_thread *
 dpif_xdp_flow_dump_thread_create(
         struct dpif_flow_dump *dump_)
@@ -1480,217 +1782,96 @@ dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
     }
 }
 
-int (*dpif_xdp_recv_set)(struct dpif *dpif, bool enable)
+static int
+dpif_xdp_recv_set(struct dpif *dpif, bool enable)
 {
+    struct dp_xdp *dp = get_dp_xdp(&dpif->dpif);
+    int error;
+
+    fat_rwlock_wrlock(&dp->upcall_lock);
+    if ((dp->handlers != NULL) == enable) {
+        error = 0;
+    } else if (!enable) {
+        destroy_all_channels(dp);
+        error = 0;
+    } else {
+        error = dp_xdp_refresh_channels(dp, 1);
+    }
+    fat_rwlock_unlock(&dp->upcall_lock);
+
+    return error;    
 
 }
 
-int (*dpif_xdp_handlers_set)(struct dpif *dpif, uint32_t n_handlers)
+static int
+dpif_xdp_handlers_set(struct dpif *dpif, uint32_t n_handlers)
 {
+    struct dp_xdp *dp = get_dp_xdp(dpif);
+    int error = 0;
 
+    fat_rwlock_wrlock(&dp->upcall_lock);
+    if (dp->handlers) {
+        error = dp_xdp_refresh_channels(dp, n_handlers);
+    }
+    fat_rwlock_unlock(&dp->upcall_lock);
+
+    return error;
 }
 
-int (*dpif_xdp_set_config)(struct dpif *dpif, const struct smap *other_config)
-{
-
-}
-
-int (*dpif_xdp_queue_to_priority)(const struct dpif *dpif, uint32_t queue_id,
-                             uint32_t *priority)
-{
-
-}
-
-int (*dpif_xdp_recv)(struct dpif *dpif, uint32_t handler_id,
+static int
+dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
                 struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
+    struct dp_xdp *dp = get_dp_xdp(dpif);
+    struct xdp_handler *handler;
+    int error;
 
+    fat_rwlock_wrlock(&dp->upcall_lock);
+    if (!dp->handlers || handler_id >= dp->n_handlers) {
+        return EAGAIN;
+    }
+
+    handler = &dp->handlers[handler_id];
+    error = recv_from_channel(handler, upcall, buf);
+    fat_rwlock_unlock(&dp->upcall_lock);
+
+    return error;
 }
-                     
-void (*dpif_xdp_recv_wait)(struct dpif *dpif, uint32_t handler_id)
+
+static void                     
+dpif_xdp_recv_wait(struct dpif *dpif, uint32_t handler_id)
 {
+    struct dp_xdp *dp = get_dp_xdp(dpif);
 
+    fat_rwlock_rdlock(&dp->upcall_lock);
+    if (dp->handlers && handler_id < dp->n_handlers) {
+        struct xdp_handler *handler = &dp->handlers[handler_id];
+
+        /* TODO: wait pooling on afxdp */
+    }
+    fat_rwlock_unlock(&dp->upcall_lock);
 }
 
-void (*dpif_xdp_recv_purge)(struct dpif *dpif)
+static void
+dpif_xdp_recv_purge(struct dpif *dpif)
 {
+    struct dp_xdp *dp = get_dp_xdp(dpif);
+    int i;
 
+    fat_rwlock_rdlock(&dp->upcall_lock);
+    for (i = 0; i < dp->n_channels; i++) {
+        struct afxdp_channel *channel = &dp->channels[i];
+
+        /* TODO: flush channel */
+    }
+    fat_rwlock_unlock(&dp->upcall_lock);
 }
 
-char *(*dpif_xdp_get_datapath_version)(void)
+static char *
+dpif_xdp_get_datapath_version()
 {
-
+    return xstrdup("<built-in>");
 }
-
-int (*dpif_xdp_ct_dump_start)(struct dpif *, struct ct_dpif_dump_state **state,
-                         const uint16_t *zone, int *)
-{
-
-}
-
-int (*dpif_xdp_ct_dump_next)(struct dpif *, struct ct_dpif_dump_state *state,
-                        struct ct_dpif_entry *entry)
-{
-
-}
-
-int (*dpif_xdp_ct_dump_done)(struct dpif *, struct ct_dpif_dump_state *state)
-{
-
-}
-
-int (*dpif_xdp_ct_flush)(struct dpif *, const uint16_t *zone,
-                    const struct ct_dpif_tuple *tuple)
-{
-
-}
-
-int (*dpif_xdp_ct_set_maxconns)(struct dpif *, uint32_t maxconns)
-{
-
-}
-
-int (*dpif_xdp_ct_get_maxconns)(struct dpif *, uint32_t *maxconns)
-{
-
-}
-
-int (*dpif_xdp_ct_get_nconns)(struct dpif *, uint32_t *nconns)
-{
-
-}
-
-int (*dpif_xdp_ct_set_tcp_seq_chk)(struct dpif *, bool enabled)
-{
-
-}
-
-int (*dpif_xdp_ct_get_tcp_seq_chk)(struct dpif *, bool *enabled)
-{
-
-}
-
-int (*dpif_xdp_ct_set_limits)(struct dpif *, const uint32_t *default_limit,
-                         const struct ovs_list *zone_limits)
-{
-
-}
-
-int (*dpif_xdp_ct_get_limits)(struct dpif *, uint32_t *default_limit,
-                         const struct ovs_list *zone_limits_in,
-                         struct ovs_list *zone_limits_out)
-{
-
-}
-
-int (*dpif_xdp_ct_del_limits)(struct dpif *, const struct ovs_list *zone_limits)
-{
-
-}
-
-int (*dpif_xdp_ct_set_timeout_policy)(struct dpif *,
-                                 const struct ct_dpif_timeout_policy *tp)
-{
-
-}
-
-int (*dpif_xdp_ct_get_timeout_policy)(struct dpif *, uint32_t tp_id,
-                                struct ct_dpif_timeout_policy *tp)
-{
-
-}
-
-int (*dpif_xdp_ct_del_timeout_policy)(struct dpif *, uint32_t tp_id)
-{
-
-}
-
-int (*dpif_xdp_ct_timeout_policy_dump_start)(struct dpif *, void **statep)
-{
-
-}
-
-int (*dpif_xdp_ct_timeout_policy_dump_next)(struct dpif *, void *state,
-                                    struct ct_dpif_timeout_policy *tp)
-{
-
-}
-
-int (*dpif_xdp_ct_timeout_policy_dump_done)(struct dpif *, void *state)
-{
-
-}
-
-int (*dpif_xdp_ct_get_timeout_policy_name)(struct dpif *, uint32_t tp_id,
-                                      uint16_t dl_type, uint8_t nw_proto,
-                                      char **tp_name, bool *is_generic)
-{
-
-}
-
-int (*dpif_xdp_ipf_set_enabled)(struct dpif *, bool v6, bool enabled)
-{
-
-}
-
-
-int (*dpif_xdp_ipf_set_min_frag)(struct dpif *, bool v6, uint32_t min_frag)
-{
-
-}
-
-
-int (*dpif_xdp_ipf_set_max_nfrags)(struct dpif *, uint32_t max_nfrags)
-{
-
-}
-
-
-int (*dpif_xdp_ipf_get_status)(struct dpif *,
-                        struct dpif_ipf_status *dpif_ipf_status)
-{
-
-}
-
-int (*dpif_xdp_ipf_dump_start)(struct dpif *, struct ipf_dump_ctx **ipf_dump_ctx)
-{
-
-}
-
-int (*dpif_xdp_ipf_dump_next)(struct dpif *, void *ipf_dump_ctx, char **dump)
-{
-
-}
-
-int (*dpif_xdp_ipf_dump_done)(struct dpif *, void *ipf_dump_ctx)
-{
-
-}
-
-void (*dpif_xdp_meter_get_features)(const struct dpif *,
-                               struct ofputil_meter_features *)
-{
-
-}
-
-int (*dpif_xdp_meter_set)(struct dpif *, ofproto_meter_id meter_id,
-                     struct ofputil_meter_config *)
-{
-
-}
-
-int (*dpif_xdp_meter_get)(const struct dpif *, ofproto_meter_id meter_id,
-                     struct ofputil_meter_stats *, uint16_t n_bands)
-{
-
-}
-
-int (*dpif_xdp_meter_del)(struct dpif *, ofproto_meter_id meter_id,
-                     struct ofputil_meter_stats *, uint16_t n_bands)
-{
-
-}
-
 
 
 const struct dpif_class dpif_xdp_class = {
@@ -1708,7 +1889,7 @@ const struct dpif_class dpif_xdp_class = {
     .set_features = NULL, // don't think we need this
     .port_add = dpif_xdp_port_add,
     .port_del = dpif_xdp_port_del,
-    .port_set_config = dpif_xdp_port_set_config,
+    .port_set_config = NULL,
     .port_query_by_number = dpif_xdp_port_query_by_number,
     .port_query_by_name = dpif_xdp_port_query_by_name,
     .port_get_pid = dpif_xdp_port_get_pid,
@@ -1727,7 +1908,7 @@ const struct dpif_class dpif_xdp_class = {
     .recv_set = dpif_xdp_recv_set,
     .handlers_set = dpif_xdp_handlers_set,
     .set_config = NULL,
-    .queue_to_priority = dpif_xdp_queue_to_priority,
+    .queue_to_priority = NULL,
     .recv = dpif_xdp_recv,
     .recv_wait = dpif_xdp_recv_wait,
     .recv_purge = dpif_xdp_recv_purge,
@@ -1736,32 +1917,32 @@ const struct dpif_class dpif_xdp_class = {
     .enable_upcall = NULL,
     .disable_upcall = NULL,
     .get_datapath_version = dpif_xdp_get_datapath_version,
-    .ct_dump_start = dpif_xdp_ct_dump_start,
-    .ct_dump_next = dpif_xdp_ct_dump_next,
-    .ct_dump_done = dpif_xdp_ct_dump_done,
-    .ct_flush = dpif_xdp_ct_flush,
+    .ct_dump_start = NULL,
+    .ct_dump_next = NULL,
+    .ct_dump_done = NULL,
+    .ct_flush = NULL,
     .ct_set_maxconns = NULL,
     .ct_get_maxconns = NULL,
     .ct_get_nconns = NULL,
     .ct_set_tcp_seq_chk = NULL,
     .ct_get_tcp_seq_chk = NULL,
-    .ct_set_limits = dpif_xdp_ct_set_limits,
-    .ct_get_limits = dpif_xdp_ct_get_limits,
-    .ct_del_limits = dpif_xdp_ct_del_limits,
-    .ct_set_timeout_policy = dpif_xdp_ct_set_timeout_policy,
-    .ct_get_timeout_policy = dpif_xdp_ct_get_timeout_policy,
-    .ct_del_timeout_policy = dpif_xdp_ct_del_timeout_policy,
-    .ct_timeout_policy_dump_start = dpif_xdp_ct_timeout_policy_dump_start,
-    .ct_timeout_policy_dump_next = dpif_xdp_ct_timeout_policy_dump_next,
-    .ct_timeout_policy_dump_done = dpif_xdp_ct_timeout_policy_dump_done,
-    .ct_get_timeout_policy_name = dpif_xdp_ct_get_timeout_policy_name,
-    .ipf_set_enabled = dpif_xdp_ipf_set_enabled,
-    .ipf_set_min_frag = dpif_xdp_ipf_set_min_frag,
-    .ipf_set_max_nfrags = dpif_xdp_ipf_set_max_nfrags,
-    .ipf_get_status = dpif_xdp_ipf_get_status,
-    .ipf_dump_start = dpif_xdp_ipf_dump_start,
-    .ipf_dump_next = dpif_xdp_ipf_dump_next,
-    .ipf_dump_done = dpif_xdp_ipf_dump_done,
+    .ct_set_limits = NULL,
+    .ct_get_limits = NULL,
+    .ct_del_limits = NULL,
+    .ct_set_timeout_policy = NULL,
+    .ct_get_timeout_policy = NULL,
+    .ct_del_timeout_policy = NULL,
+    .ct_timeout_policy_dump_start = NULL,
+    .ct_timeout_policy_dump_next = NULL,
+    .ct_timeout_policy_dump_done = NULL,
+    .ct_get_timeout_policy_name = NULL,
+    .ipf_set_enabled = NULL,
+    .ipf_set_min_frag = NULL,
+    .ipf_set_max_nfrags = NULL,
+    .ipf_get_status = NULL,
+    .ipf_dump_start = NULL,
+    .ipf_dump_next = NULL,
+    .ipf_dump_done = NULL,
     .meter_get_features = NULL, // TODO: dpif_xdp_meter_get_features,
     .meter_set = NULL, // TODO: dpif_xdp_meter_set,
     .meter_get = NULL, // TODO: dpif_xdp_meter_get,
