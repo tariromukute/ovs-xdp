@@ -3614,21 +3614,21 @@ const struct netdev_class netdev_xdp_class = {
     NETDEV_LINUX_CLASS_COMMON,
     .type = "xdp",
     .is_pmd = true,
-    .init = netdev_xdp_init,
+    // .init = netdev_xdp_init,
     .construct = netdev_xdp_construct,
     .destruct = netdev_xdp_destruct,
-    .get_stats = netdev_xdp_get_stats,
-    .get_custom_stats = netdev_xdp_get_custom_stats,
+    .get_stats = netdev_linux_get_stats,
+    .get_custom_stats = netdev_linux_get_custom_stats,
     .get_status = netdev_linux_get_status,
-    .set_config = netdev_xdp_set_config,
-    .get_config = netdev_xdp_get_config,
-    .reconfigure = netdev_xdp_reconfigure,
+    .set_config = netdev_linux_set_config,
+    .get_config = netdev_linux_get_config,
+    .reconfigure = netdev_linux_reconfigure,
     .get_numa_id = netdev_linux_get_numa_id,
-    .send = netdev_xdp_batch_send,
-    .rxq_construct = netdev_xdp_rxq_construct,
-    .rxq_destruct = netdev_xdp_rxq_destruct,
+    // .send = netdev_xdp_batch_send,
+    // .rxq_construct = netdev_xdp_rxq_construct,
+    // .rxq_destruct = netdev_xdp_rxq_destruct,
     .rxq_recv = netdev_xdp_rxq_recv,
-    .set_xdp = netdev_xdp_set_prog
+    // .set_xdp = netdev_xdp_set_prog
 }
 #endif
 
