@@ -360,7 +360,7 @@ endif
 
 EXTRA_DIST += \
 	lib/stdio.h.in \
-	lib/string.h.in
+	lib/string.h.in 
 
 nodist_lib_libopenvswitch_la_SOURCES = \
 	lib/dirs.c \
@@ -425,11 +425,10 @@ lib_libopenvswitch_la_SOURCES += \
 	lib/netdev-afxdp.h
 endif
 
-# ==== ADDED =====
 if HAVE_XDP
 lib_libopenvswitch_la_SOURCES += \
-	lib/netdev-xdp.c \
-	lib/netdev-xdp.h
+	lib/dpif-xdp.h \
+	lib/dpif-xdp.c 
 endif
 
 if DPDK_NETDEV

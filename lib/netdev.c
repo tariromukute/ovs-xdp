@@ -2258,16 +2258,3 @@ netdev_free_custom_stats_counters(struct netdev_custom_stats *custom_stats)
         }
     }
 }
-
-
-/* ==== ADDED ====
- * 
- * Attempts to apply (e)BPF filter 'prog' to the netdev. 
- */
-int
-netdev_set_xdp(struct netdev *netdev, struct bpf_prog *prog)
-{
-    return (netdev->netdev_class->set_xdp
-            ? netdev->netdev_class->set_xdp(netdev, prog)
-            : EOPNOTSUPP);
-}

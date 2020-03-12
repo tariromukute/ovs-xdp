@@ -305,7 +305,7 @@ dnl OVS_CHECK_LINUX_XDP
 dnl
 dnl Check both Linux kernel XDP and libbpf support
 AC_DEFUN([OVS_CHECK_LINUX_XDP], [
-  AC_ARG_ENABLE([afxdp],
+  AC_ARG_ENABLE([xdp],
                 [AC_HELP_STRING([--enable-xdp], [Enable XDP support])],
                 [], [enable_xdp=no])
   AC_MSG_CHECKING([whether XDP is enabled])
@@ -317,13 +317,13 @@ AC_DEFUN([OVS_CHECK_LINUX_XDP], [
     XDP_ENABLE=true
 
     AC_CHECK_HEADER([bpf/libbpf.h], [],
-      [AC_MSG_ERROR([unable to find bpf/libbpf.h for AF_XDP support])])
+      [AC_MSG_ERROR([unable to find bpf/libbpf.h for XDP support])])
 
     AC_CHECK_HEADER([linux/if_xdp.h], [],
-      [AC_MSG_ERROR([unable to find linux/if_xdp.h for AF_XDP support])])
+      [AC_MSG_ERROR([unable to find linux/if_xdp.h for XDP support])])
 
     AC_DEFINE([HAVE_XDP], [1],
-              [Define to 1 if AF_XDP support is available and enabled.])
+              [Define to 1 if XDP support is available and enabled.])
     LIBBPF_LDADD=" -lbpf -lelf"
     AC_SUBST([LIBBPF_LDADD])
   fi

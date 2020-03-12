@@ -775,12 +775,6 @@ struct netdev_class {
      * applied. */
     int (*reconfigure)(struct netdev *netdev);
 
-    /* ===== ADDED ======
-     *
-     * Attempts to attach a XDP eBPF program.
-     *
-     * This function may be set to null if filters are not supported. */
-    int (*set_xdp)(struct netdev *netdev, const struct bpf_prog *);
 /* ## -------------------- ## */
 /* ## netdev_rxq Functions ## */
 /* ## -------------------- ## */

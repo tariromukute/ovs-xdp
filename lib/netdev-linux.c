@@ -3615,21 +3615,20 @@ const struct netdev_class netdev_xdp_class = {
     .type = "xdp",
     .is_pmd = true,
     // .init = netdev_xdp_init,
-    .construct = netdev_xdp_construct,
-    .destruct = netdev_xdp_destruct,
+    .construct = netdev_linux_construct,
+    .destruct = netdev_linux_destruct,
     .get_stats = netdev_linux_get_stats,
-    .get_custom_stats = netdev_linux_get_custom_stats,
+    // .get_custom_stats = netdev_linux_get_custom_stats,
     .get_status = netdev_linux_get_status,
-    .set_config = netdev_linux_set_config,
-    .get_config = netdev_linux_get_config,
-    .reconfigure = netdev_linux_reconfigure,
-    .get_numa_id = netdev_linux_get_numa_id,
+    // .set_config = netdev_linux_set_config,
+    // .get_config = netdev_linux_get_config,
+    // .reconfigure = netdev_linux_reconfigure,
+    // .get_numa_id = netdev_linux_get_numa_id,
     // .send = netdev_xdp_batch_send,
     // .rxq_construct = netdev_xdp_rxq_construct,
     // .rxq_destruct = netdev_xdp_rxq_destruct,
-    .rxq_recv = netdev_xdp_rxq_recv,
-    // .set_xdp = netdev_xdp_set_prog
-}
+    // .rxq_recv = netdev_linux_rxq_recv,
+};
 #endif
 
 

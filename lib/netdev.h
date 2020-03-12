@@ -152,9 +152,6 @@ int netdev_n_rxq(const struct netdev *netdev);
 bool netdev_is_pmd(const struct netdev *netdev);
 bool netdev_has_tunnel_push_pop(const struct netdev *netdev);
 
-/* ==== ADDED ==== */
-int netdev_set_xdp(struct netdev *netdev, struct bpf_prog *prog);
-
 /* Open and close. */
 int netdev_open(const char *name, const char *type, struct netdev **netdevp);
 
