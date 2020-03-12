@@ -1,3 +1,4 @@
+#include <config.h>
 #include "dpif-xdp.h"
 
 #include <ctype.h>
