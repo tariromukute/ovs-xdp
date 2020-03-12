@@ -27,6 +27,7 @@
 #include "dpctl.h"
 #include "dp-packet.h"
 #include "dpif-netdev.h"
+#include "dpif-xdp.h"
 #include "openvswitch/dynamic-string.h"
 #include "flow.h"
 #include "netdev.h"
@@ -70,6 +71,9 @@ COVERAGE_DEFINE(dpif_meter_del);
 static const struct dpif_class *base_dpif_classes[] = {
 #if defined(__linux__) || defined(_WIN32)
     &dpif_netlink_class,
+#endif
+#if HAVE_XDP  /* XXX: Linux 4.9+ */
+    &dpif_xdp_class,
 #endif
     &dpif_netdev_class,
 };

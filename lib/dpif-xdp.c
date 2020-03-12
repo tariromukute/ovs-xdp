@@ -73,6 +73,7 @@
     contain the same dp(s), this might need to be factored in and 
     will contribute to some code reuse or similar code.
    ================================================================ */
+VLOG_DEFINE_THIS_MODULE(dpif_xdp);
 
 #define FLOW_DUMP_MAX_BATCH 50
 
@@ -358,6 +359,7 @@ get_port_by_name(struct dp_xdp *dp,
                  const char *devname, struct dp_xdp_port **portp)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_port *port; // IMPORTANT: port type not common
 
     HMAP_FOR_EACH (port, node, &dp->ports) {
@@ -377,6 +379,7 @@ static void
 answer_port_query(const struct dp_xdp_port *port,
                   struct dpif_port *dpif_port)
 {
+    VLOG_INFO("Called %s:", __func__);
     dpif_port->name = xstrdup(netdev_get_name(port->netdev));
     dpif_port->type = xstrdup(port->type);
     dpif_port->port_no = port->port_no;
@@ -385,6 +388,7 @@ answer_port_query(const struct dp_xdp_port *port,
 static uint32_t
 hash_port_no(odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     return hash_int(odp_to_u32(port_no), 0);
 }
 
@@ -392,6 +396,7 @@ static struct dp_xdp_port *
 dp_xdp_lookup_port(const struct dp_xdp *dp, odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_port *port;
 
     HMAP_FOR_EACH_WITH_HASH (port, node, hash_port_no(port_no), &dp->ports) {
@@ -405,6 +410,7 @@ dp_xdp_lookup_port(const struct dp_xdp *dp, odp_port_t port_no)
 static bool
 is_valid_port_number(odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     return port_no != ODPP_NONE;
 }
 
@@ -414,6 +420,7 @@ get_port_by_number(struct dp_xdp *dp,
                    odp_port_t port_no, struct dp_xdp_port **portp)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     if (!is_valid_port_number(port_no)) {
         *portp = NULL;
         return EINVAL;
@@ -426,12 +433,14 @@ get_port_by_number(struct dp_xdp *dp,
 bool
 dpif_is_xdp(const struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     return dpif->dpif_class->open == dpif_xdp_open;
 }
 
 static struct dpif_xdp *
 dpif_xdp_cast(const struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     
     ovs_assert(dpif_is_xdp(dpif));
     return CONTAINER_OF(dpif, struct dpif_xdp, dpif);
@@ -440,12 +449,14 @@ dpif_xdp_cast(const struct dpif *dpif)
 static struct dp_xdp *
 get_dp_xdp(const struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     return dpif_xdp_cast(dpif)->dp;
 }
 
 static void
 port_destroy(struct dp_xdp_port *port)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: Might remove some of the port attributes
         so will need to remove some of the code here */
     if (!port) {
@@ -469,6 +480,7 @@ static void
 do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_entry_point *ep;
 
     /* Remove ep */
@@ -485,6 +497,7 @@ do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
 static int
 port_add_channel(struct dp_xdp *dp, odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct afxdp_channel *channel;
     int i;
     int error = 0;
@@ -505,6 +518,7 @@ static odp_port_t
 choose_port(struct dp_xdp *dp, const char *name)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     uint32_t port_no;
 
     if (!is_dp_xdp(dp)) {
@@ -545,6 +559,7 @@ static int
 port_create(const char *devname, const char *type,
             odp_port_t port_no, struct dp_xdp_port **portp)
 {
+    VLOG_INFO("Called %s:", __func__);
     int error = 0;
     /* TODO: implement method */
 
@@ -556,6 +571,7 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
             odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_port *port;
     struct dp_xdp_entry_point *ep;
     // uint32_t upcall_pids = 0;
@@ -590,6 +606,7 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
 static void
 afxdp_channel_close(struct afxdp_channel *channel)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: close channel */
 }
 
@@ -597,6 +614,7 @@ static void
 destroy_all_channels(struct dp_xdp *dp)
     OVS_REQ_WRLOCK(dp->upcall_lock)
 {
+    VLOG_INFO("Called %s:", __func__);
     // unsigned int i;
     /* TODO: implement methods */
 
@@ -627,6 +645,7 @@ static int
 dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
     OVS_REQ_WRLOCK(dp->upcall_lock)
 {
+    VLOG_INFO("Called %s:", __func__);
     int error = 0;
 
     /* TODO: implement the method */
@@ -640,6 +659,7 @@ static void
 dp_xdp_free(struct dp_xdp *dp)
     OVS_REQUIRES(dp_xdp_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_port *port, *next;
 
     shash_find_and_delete(&dp_xdps, dp->name);
@@ -677,6 +697,7 @@ dp_xdp_free(struct dp_xdp *dp)
 static void
 dp_xdp_unref(struct dp_xdp *dp)
 {
+    VLOG_INFO("Called %s:", __func__);
     if (dp) {
         /* Take dp_xdp_mutex so that, if dp->ref_cnt falls to zero, we can't
          * get a new reference to 'dp' through the 'dp_xdps' shash. */
@@ -691,6 +712,7 @@ dp_xdp_unref(struct dp_xdp *dp)
 static struct dpif *
 create_dpif_xdp(struct dp_xdp *dp)
 {
+    VLOG_INFO("Called %s:", __func__);
     uint16_t netflow_id = hash_string(dp->name, 0);
     struct dpif_xdp *dpif;
 
@@ -707,6 +729,7 @@ create_dpif_xdp(struct dp_xdp *dp)
 static int
 dp_xdp_handler_init(struct xdp_handler *handler)
 {
+    VLOG_INFO("Called %s:", __func__);
     int error = 0;
 
     /* TODO: initialise handler */
@@ -717,6 +740,7 @@ dp_xdp_handler_init(struct xdp_handler *handler)
 static void
 dp_xdp_handler_uninit(struct xdp_handler *handler)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: uninitialise handler */
 }
 
@@ -752,6 +776,7 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
                  struct dp_xdp **dpp)
     OVS_REQUIRES(dp_xdp_mutex)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp;
     int error;
 
@@ -801,6 +826,7 @@ static int
 dpif_xdp_flow_from_nlattrs(const struct nlattr *key, uint32_t key_len,
                               struct flow *flow, bool probe)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: implement method */
 
     return 0;
@@ -812,6 +838,7 @@ dpif_xdp_mask_from_nlattrs(const struct nlattr *key, uint32_t key_len,
                               uint32_t mask_key_len, const struct flow *flow,
                               struct flow_wildcards *wc, bool probe)
 {
+    VLOG_INFO("Called %s:", __func__);
 
     /* TODO: implement method */
 
@@ -829,6 +856,7 @@ dp_xdp_ep_remove_flow(struct dp_xdp_entry_point *ep,
 static void
 dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep)
 {
+    VLOG_INFO("Called %s:", __func__);
     // struct dp_xdp_flow *xdp_flow;
 
     // ovs_mutex_lock(&ep->flow_mutex); /* TODO: uncomment if needed */
@@ -844,6 +872,7 @@ dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
                           const struct xdp_flow_key *key,
                           int *lookup_num_p)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_flow *xdp_flow = NULL;
 
     /* TODO: implement method */
@@ -855,6 +884,7 @@ dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
                         const ovs_u128 *ufidp, const struct nlattr *key,
                         size_t key_len)
 {
+    VLOG_INFO("Called %s:", __func__);
     // struct dp_xdp_flow *xdp_flow;
     // struct flow flow;
     // ovs_u128 ufid;
@@ -874,12 +904,14 @@ dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
 static struct dpif_xdp_flow_dump *
 dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump)
 {
+    VLOG_INFO("Called %s:", __func__);
     return CONTAINER_OF(dump, struct dpif_xdp_flow_dump, up);
 }
 
 static struct dpif_xdp_flow_dump_thread *
 dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread)
 {
+    VLOG_INFO("Called %s:", __func__);
     return CONTAINER_OF(thread, struct dpif_xdp_flow_dump_thread, up);
 }
 
@@ -888,6 +920,7 @@ static void
 dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
                         odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: implement method */
 
     // cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
@@ -903,6 +936,7 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
 static void
 dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep)
 {
+    VLOG_INFO("Called %s:", __func__);
 
     dp_xdp_ep_flow_flush(ep);
 
@@ -921,12 +955,14 @@ dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep)
 static bool
 dp_xdp_ep_try_ref(struct dp_xdp_entry_point *ep)
 {
+    VLOG_INFO("Called %s:", __func__);
     return ovs_refcount_try_ref_rcu(&ep->ref_cnt);
 }
 
 static void
 dp_xdp_ep_unref(struct dp_xdp_entry_point *ep)
 {
+    VLOG_INFO("Called %s:", __func__);
     if (ep && ovs_refcount_unref(&ep->ref_cnt) == 1) {
         ovsrcu_postpone(dp_xdp_destroy_ep, ep);
     }
@@ -935,6 +971,7 @@ dp_xdp_ep_unref(struct dp_xdp_entry_point *ep)
 static void
 dp_xdp_actions_free(struct dp_xdp_actions *actions)
 {
+    VLOG_INFO("Called %s:", __func__);
     free(actions);
 }
 
@@ -943,6 +980,7 @@ dp_xdp_actions_free(struct dp_xdp_actions *actions)
 struct dp_xdp_actions *
 dp_xdp_actions_create(const struct nlattr *actions, size_t size)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_actions *xdp_actions;
 
     // TODO: implement method relavant to our dp_xdp_actions
@@ -957,6 +995,7 @@ dp_xdp_actions_create(const struct nlattr *actions, size_t size)
 struct dp_xdp_actions *
 dp_xdp_flow_get_actions(const struct dp_xdp_flow *flow)
 {
+    VLOG_INFO("Called %s:", __func__);
     // return ovsrcu_get(struct dp_xdp_actions *, &flow->actions);
     return NULL;
 }
@@ -969,6 +1008,7 @@ dp_xdp_flow_get_actions(const struct dp_xdp_flow *flow)
 static struct dp_xdp_entry_point *
 dp_xdp_get_ep(struct dp_xdp *dp, odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_entry_point *ep;
     const struct cmap_node *pnode;
 
@@ -988,6 +1028,7 @@ dp_xdp_get_ep(struct dp_xdp *dp, odp_port_t port_no)
 static struct dp_xdp_entry_point *
 dp_xdp_ep_get_next(struct dp_xdp *dp, struct cmap_position *pos)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_entry_point *next;
 
     do {
@@ -1007,6 +1048,7 @@ dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
                             struct dpif_flow *flow, bool terse)
 {
+    VLOG_INFO("Called %s:", __func__);
 
     /* TODO: implement this method */
 
@@ -1019,6 +1061,7 @@ static void
 dpif_xdp_flow_get_stats(const struct dp_xdp_flow *flow,
                             struct dpif_flow_stats *stats)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: implement method */
 }
 
@@ -1030,6 +1073,7 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
                 const struct dpif_flow_put *put,
                 struct dpif_flow_stats *stats)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_flow *xdp_flow;
     int error = 0;
 
@@ -1102,6 +1146,7 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
 static int
 dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct xdp_flow_key key; //, mask;
     struct dp_xdp_entry_point *ep;
@@ -1193,6 +1238,7 @@ flow_del_on_ep(struct dp_xdp_entry_point *ep,
                 struct dpif_flow_stats *stats,
                 const struct dpif_flow_del *del)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp_flow *xdp_flow;
     int error = 0;
 
@@ -1215,6 +1261,7 @@ flow_del_on_ep(struct dp_xdp_entry_point *ep,
 static int
 dpif_xdp_flow_del(struct dpif *dpif, const struct dpif_flow_del *del)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_entry_point *ep;
     int error = 0;
@@ -1292,6 +1339,7 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
 static int
 dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_flow *xdp_flow;
     struct dp_xdp_entry_point *ep;
@@ -1343,6 +1391,7 @@ out:
 static int
 afxdp_channel_read(struct afxdp_channel *channel, struct ofpbuf *buffer)
 {
+    VLOG_INFO("Called %s:", __func__);
     int error = 0;
     
     /* TODO: implement method */
@@ -1371,6 +1420,8 @@ recv_from_channel(struct xdp_handler *handler, struct dpif_upcall *upcall, struc
 static int
 dpif_xdp_init()
 {
+    VLOG_INFO("Called %s:", __func__);
+    VLOG_INFO("dpif_xdp_init");
     static int error = 0; // retains it's previous value in future calls
 
     /*  TODO: not sure if (1) should be done now or on create 
@@ -1387,6 +1438,7 @@ dpif_xdp_init()
 static int
 dpif_xdp_enumerate(struct sset *all_dps, const struct dpif_class *dpif_class)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct shash_node *node;
 
     ovs_mutex_lock(&dp_xdp_mutex);
@@ -1408,6 +1460,7 @@ static const char *
 dpif_xdp_port_open_type(const struct dpif_class *dpif_class,
                                   const char *type)
 {
+    VLOG_INFO("Called %s:", __func__);
     return strcmp(type, "internal") ? type : "tap";
 }
 
@@ -1415,6 +1468,7 @@ static int
 dpif_xdp_open(const struct dpif_class *dpif_class,
                 const char *name, bool create, struct dpif **dpifp)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp;
     int error;
 
@@ -1444,6 +1498,7 @@ dpif_xdp_open(const struct dpif_class *dpif_class,
 static void
 dpif_xdp_close(struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
 
     dp_xdp_unref(dp);
@@ -1453,6 +1508,7 @@ dpif_xdp_close(struct dpif *dpif)
 static int
 dpif_xdp_destroy(struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
 
     if (!atomic_flag_test_and_set(&dp->destroyed)) {
@@ -1468,6 +1524,7 @@ dpif_xdp_destroy(struct dpif *dpif)
 static bool
 dpif_xdp_run(struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     /* TODO: check if this is needed for now returning
        false indicating that there is no periodic work 
        needed to be done. */
@@ -1478,6 +1535,7 @@ dpif_xdp_run(struct dpif *dpif)
 static int
 dpif_xdp_get_stats(const struct dpif *dpif, struct dpif_dp_stats *stats)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_entry_point *ep;
 
@@ -1493,6 +1551,7 @@ static int
 dpif_xdp_port_add(struct dpif *dpif, struct netdev *netdev,
                     odp_port_t *port_nop)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     char namebuf[NETDEV_VPORT_NAME_BUFSIZE];
     const char *dpif_port;
@@ -1528,6 +1587,7 @@ unlock:
 static int
 dpif_xdp_port_del(struct dpif *dpif, odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_port *port;
     int error;
@@ -1546,6 +1606,7 @@ static int
 dpif_xdp_port_query_by_number(const struct dpif *dpif, odp_port_t port_no,
                                 struct dpif_port *dpif_port)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_port *port;
     int error;
@@ -1564,6 +1625,7 @@ static int
 dpif_xdp_port_query_by_name(const struct dpif *dpif, const char *devname,
                               struct dpif_port *dpif_port)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_port *port;
     int error;
@@ -1598,6 +1660,7 @@ dpif_xdp_port_query_by_name(const struct dpif *dpif, const char *devname,
 static uint32_t 
 dpif_xdp_port_get_pid(const struct dpif *dpif, odp_port_t port_no)
 {
+    VLOG_INFO("Called %s:", __func__);
     uint32_t ret = 0;
 
     /* TODO: check if lock is needed for afxdp upcalls (also see dpif_xdp) */
@@ -1617,6 +1680,7 @@ dpif_xdp_port_get_pid(const struct dpif *dpif, odp_port_t port_no)
 static int
 dpif_xdp_port_dump_start(const struct dpif *dpif, void **statep)
 {
+    VLOG_INFO("Called %s:", __func__);
     *statep = xzalloc(sizeof(struct dpif_xdp_port_state));
     return 0;
 }
@@ -1625,6 +1689,7 @@ static int
 dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
                           struct dpif_port *dpif_port)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_port_state *state = state_;
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct hmap_node *node;
@@ -1655,6 +1720,7 @@ dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
 static int
 dpif_xdp_port_dump_done(const struct dpif *dpif, void *state_)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_port_state *state = state_;
     free(state->name);
     free(state);
@@ -1664,6 +1730,7 @@ dpif_xdp_port_dump_done(const struct dpif *dpif, void *state_)
 static int
 dpif_xdp_port_poll(const struct dpif *dpif_, char **devnamep)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp *dpif = dpif_xdp_cast(dpif_);
     uint64_t new_port_seq;
     int error;
@@ -1682,6 +1749,7 @@ dpif_xdp_port_poll(const struct dpif *dpif_, char **devnamep)
 static void
 dpif_xdp_port_poll_wait(const struct dpif *dpif_)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp *dpif = dpif_xdp_cast(dpif_);
 
     seq_wait(dpif->dp->port_seq, dpif->last_port_seq);
@@ -1690,6 +1758,7 @@ dpif_xdp_port_poll_wait(const struct dpif *dpif_)
 static int
 dpif_xdp_flow_flush(struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_entry_point *ep;
 
@@ -1707,6 +1776,7 @@ dpif_xdp_flow_dump_create(
         bool terse,
         struct dpif_flow_dump_types *types)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_flow_dump *dump;
 
     dump = xzalloc(sizeof *dump);
@@ -1726,6 +1796,7 @@ dpif_xdp_flow_dump_create(
 static int
 dpif_xdp_flow_dump_destroy(struct dpif_flow_dump *dump_)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_flow_dump *dump = dpif_xdp_flow_dump_cast(dump_);
 
     ovs_mutex_destroy(&dump->mutex);
@@ -1737,6 +1808,7 @@ static struct dpif_flow_dump_thread *
 dpif_xdp_flow_dump_thread_create(
         struct dpif_flow_dump *dump_)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_flow_dump *dump = dpif_xdp_flow_dump_cast(dump_);
     struct dpif_xdp_flow_dump_thread *thread;
 
@@ -1749,6 +1821,7 @@ dpif_xdp_flow_dump_thread_create(
 static void
 dpif_xdp_flow_dump_thread_destroy(struct dpif_flow_dump_thread *thread_)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_flow_dump_thread *thread
         = dpif_xdp_flow_dump_thread_cast(thread_);
 
@@ -1759,6 +1832,7 @@ static int
 dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
                           struct dpif_flow *flows, int max_flows)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dpif_xdp_flow_dump_thread *thread
         = dpif_xdp_flow_dump_thread_cast(thread_);
     struct dpif_xdp_flow_dump *dump = thread->dump;
@@ -1838,6 +1912,7 @@ static void
 dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
                     enum dpif_offload_type offload_type)
 {
+    VLOG_INFO("Called %s:", __func__);
     size_t i;
 
     for (i = 0; i < n_ops; i++) {
@@ -1866,6 +1941,7 @@ dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
 static int
 dpif_xdp_recv_set(struct dpif *dpif, bool enable)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     int error;
 
@@ -1887,6 +1963,7 @@ dpif_xdp_recv_set(struct dpif *dpif, bool enable)
 static int
 dpif_xdp_handlers_set(struct dpif *dpif, uint32_t n_handlers)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     int error = 0;
 
@@ -1903,6 +1980,7 @@ static int
 dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
                 struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct xdp_handler *handler;
     int error;
@@ -1924,6 +2002,7 @@ out:
 static void                     
 dpif_xdp_recv_wait(struct dpif *dpif, uint32_t handler_id)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
 
     fat_rwlock_rdlock(&dp->upcall_lock);
@@ -1938,6 +2017,7 @@ dpif_xdp_recv_wait(struct dpif *dpif, uint32_t handler_id)
 static void
 dpif_xdp_recv_purge(struct dpif *dpif)
 {
+    VLOG_INFO("Called %s:", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     int i;
 
@@ -1953,6 +2033,7 @@ dpif_xdp_recv_purge(struct dpif *dpif)
 static char *
 dpif_xdp_get_datapath_version()
 {
+    VLOG_INFO("Called %s:", __func__);
     return xstrdup("<built-in>");
 }
 #pragma GCC diagnostic pop
