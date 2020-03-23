@@ -6,15 +6,15 @@
 #include "flow.h"
 
 struct bpf_pinned_map {
-	const char *name;
-	const char *filename;
-	int map_fd;
+    const char *name;
+    const char *filename;
+    int map_fd;
 };
 
 struct flow_table {
-	struct bpf_pinned_map map;
-	/* port_no */
-	/* bpf_map_def */
+    struct bpf_pinned_map map;
+    /* port_no */
+    /* bpf_map_def */
 };
 
 int ovs_flow_init(void);
@@ -32,7 +32,7 @@ int ovs_flow_tbl_insert(struct flow_table *table, struct xdp_flow *flow);
 void ovs_flow_tbl_remove(struct flow_table *table, struct xdp_flow *flow);
 int  ovs_flow_tbl_num_masks(const struct flow_table *table);
 struct xdp_flow *ovs_flow_tbl_lookup(struct flow_table *,
-				    const struct xdp_flow_key *);
+                    const struct xdp_flow_key *);
 struct xdp_flow *ovs_flow_tbl_lookup_ufid(struct flow_table *,
-					 const struct xdp_flow_id *);
-#endif /* flow_table.h */					 
+                     const struct xdp_flow_id *);
+#endif /* flow_table.h */                     

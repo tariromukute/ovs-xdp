@@ -198,25 +198,25 @@
  * @nshc<1-4>: NSH Contexts.
  */
 struct nsh_md1_ctx {
-	__be32 context[4];
+    __be32 context[4];
 };
 
 struct nsh_md2_tlv {
-	__be16 md_class;
-	__u8 type;
-	__u8 length;
-	__u8 md_value[];
+    __be16 md_class;
+    __u8 type;
+    __u8 length;
+    __u8 md_value[];
 };
 
 struct nshhdr {
-	__be16 ver_flags_ttl_len;
-	__u8 mdtype;
-	__u8 np;
-	__be32 path_hdr;
-	union {
-	    struct nsh_md1_ctx md1;
-	    struct nsh_md2_tlv md2;
-	};
+    __be16 ver_flags_ttl_len;
+    __u8 mdtype;
+    __u8 np;
+    __be32 path_hdr;
+    union {
+        struct nsh_md1_ctx md1;
+        struct nsh_md2_tlv md2;
+    };
 };
 
 /* Masking NSH header fields. */
@@ -257,54 +257,54 @@ struct nshhdr {
 
 // static inline struct nshhdr *nsh_hdr(struct sk_buff *skb)
 // {
-// 	return (struct nshhdr *)skb_network_header(skb);
+//     return (struct nshhdr *)skb_network_header(skb);
 // }
 
 static inline __u16 nsh_hdr_len(const struct nshhdr *nsh)
 {
-	return ((bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_LEN_MASK)
-		>> NSH_LEN_SHIFT) << 2;
+    return ((bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_LEN_MASK)
+        >> NSH_LEN_SHIFT) << 2;
 }
 
 static inline __u8 nsh_get_ver(const struct nshhdr *nsh)
 {
-	return (bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_VER_MASK)
-		>> NSH_VER_SHIFT;
+    return (bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_VER_MASK)
+        >> NSH_VER_SHIFT;
 }
 
 static inline __u8 nsh_get_flags(const struct nshhdr *nsh)
 {
-	return (bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_FLAGS_MASK)
-		>> NSH_FLAGS_SHIFT;
+    return (bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_FLAGS_MASK)
+        >> NSH_FLAGS_SHIFT;
 }
 
 static inline __u8 nsh_get_ttl(const struct nshhdr *nsh)
 {
-	return (bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_TTL_MASK)
-		>> NSH_TTL_SHIFT;
+    return (bpf_ntohs(nsh->ver_flags_ttl_len) & NSH_TTL_MASK)
+        >> NSH_TTL_SHIFT;
 }
 
 static inline void __nsh_set_xflag(struct nshhdr *nsh, __u16 xflag, __u16 xmask)
 {
-	nsh->ver_flags_ttl_len
-		= (nsh->ver_flags_ttl_len & ~bpf_htons(xmask)) | bpf_htons(xflag);
+    nsh->ver_flags_ttl_len
+        = (nsh->ver_flags_ttl_len & ~bpf_htons(xmask)) | bpf_htons(xflag);
 }
 
 static inline void nsh_set_flags_and_ttl(struct nshhdr *nsh, __u8 flags, __u8 ttl)
 {
-	__nsh_set_xflag(nsh, ((flags << NSH_FLAGS_SHIFT) & NSH_FLAGS_MASK) |
-			     ((ttl << NSH_TTL_SHIFT) & NSH_TTL_MASK),
-			NSH_FLAGS_MASK | NSH_TTL_MASK);
+    __nsh_set_xflag(nsh, ((flags << NSH_FLAGS_SHIFT) & NSH_FLAGS_MASK) |
+                 ((ttl << NSH_TTL_SHIFT) & NSH_TTL_MASK),
+            NSH_FLAGS_MASK | NSH_TTL_MASK);
 }
 
 static inline void nsh_set_flags_ttl_len(struct nshhdr *nsh, __u8 flags,
-					 __u8 ttl, __u8 len)
+                     __u8 ttl, __u8 len)
 {
-	len = len >> 2;
-	__nsh_set_xflag(nsh, ((flags << NSH_FLAGS_SHIFT) & NSH_FLAGS_MASK) |
-			     ((ttl << NSH_TTL_SHIFT) & NSH_TTL_MASK) |
-			     ((len << NSH_LEN_SHIFT) & NSH_LEN_MASK),
-			NSH_FLAGS_MASK | NSH_TTL_MASK | NSH_LEN_MASK);
+    len = len >> 2;
+    __nsh_set_xflag(nsh, ((flags << NSH_FLAGS_SHIFT) & NSH_FLAGS_MASK) |
+                 ((ttl << NSH_TTL_SHIFT) & NSH_TTL_MASK) |
+                 ((len << NSH_LEN_SHIFT) & NSH_LEN_MASK),
+            NSH_FLAGS_MASK | NSH_TTL_MASK | NSH_LEN_MASK);
 }
 
 // int nsh_push(struct sk_buff *skb, const struct nshhdr *pushed_nh);

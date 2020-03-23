@@ -71,7 +71,7 @@ int  ovs_flow_tbl_num_masks(const struct flow_table *table)
 }
 
 struct xdp_flow *ovs_flow_tbl_lookup(struct flow_table *tbl,
-				    const struct xdp_flow_key *key)
+                    const struct xdp_flow_key *key)
 {
     struct xdp_flow *flow;
     /* TODO: implement method */
@@ -80,7 +80,7 @@ struct xdp_flow *ovs_flow_tbl_lookup(struct flow_table *tbl,
 }
 
 struct xdp_flow *ovs_flow_tbl_lookup_ufid(struct flow_table *tbl,
-					 const struct xdp_flow_id *id)
+                     const struct xdp_flow_id *id)
 {
     struct xdp_flow *flow;
     /* TODO: implement method */

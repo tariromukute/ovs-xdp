@@ -4,13 +4,13 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 void ovs_flow_stats_update(struct xdp_flow *flow, __be16 tcp_flags,
-			   const struct xdp_md *ctx)
+               const struct xdp_md *ctx)
 {
     /* TODO: implement method */
 }
 
 void ovs_flow_stats_get(const struct xdp_flow *flow, struct ovs_flow_stats *stats,
-			unsigned long *used, __be16 *tcp_flags)
+            unsigned long *used, __be16 *tcp_flags)
 {
     /* TODO: implement method */
 }
@@ -35,8 +35,8 @@ int ovs_flow_key_update(struct xdp_md *ctx, struct xdp_flow_key *key)
 }
 
 // int ovs_flow_key_extract(const struct ip_tunnel_info *tun_info,
-// 			 struct xdp_md *ctx,
-// 			 struct xdp_flow_key *key)
+//              struct xdp_md *ctx,
+//              struct xdp_flow_key *key)
 // {
 //     /* TODO: implement method */
 //     return 0;
@@ -44,8 +44,8 @@ int ovs_flow_key_update(struct xdp_md *ctx, struct xdp_flow_key *key)
 
 // /* Extract key from packet coming from userspace. */
 // int ovs_flow_key_extract_userspace(struct net *net, const struct nlattr *attr,
-// 				   struct xdp_md *ctx,
-// 				   struct xdp_flow_key *key, bool log)
+//                    struct xdp_md *ctx,
+//                    struct xdp_flow_key *key, bool log)
 // {
 //     /* TODO: implement method */
 //     return 0;

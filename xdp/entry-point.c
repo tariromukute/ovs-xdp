@@ -71,10 +71,10 @@
 #include "flow.h"
 
 struct bpf_map_def SEC("maps") flow_map = {
-	.type = BPF_MAP_TYPE_HASH,
-	.key_size = (sizeof(struct xdp_flow_id)),
-	.value_size = (sizeof(struct xdp_flow)),
-	.max_entries = 256,
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = (sizeof(struct xdp_flow_id)),
+    .value_size = (sizeof(struct xdp_flow)),
+    .max_entries = 256,
 };
 
 #pragma GCC diagnostic push
@@ -98,13 +98,13 @@ int xdp_process(struct xdp_md *ctx)
        If error it will drop the packet and log the operation. 
        
        If any error occurs from the tailed fuctions the packets will be dropped.*/
-	return XDP_PASS; 
+    return XDP_PASS; 
 }
 
 SEC("xdp")
 int  xdp_downcall(struct xdp_md *ctx)
 {
-	return XDP_DROP;
+    return XDP_DROP;
 }
 #pragma GCC diagnostic pop
 

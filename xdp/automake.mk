@@ -90,6 +90,16 @@ xdp_headers = \
 	xdp/flow-table.h \
 	xdp/nsh.h
 
+helpers_headers = \
+	xdp/headers/bpf_endian.h \
+	xdp/headers/bpf_helpers.h \
+	xdp/headers/bpf_util.h \
+	xdp/headers/jhash.h \
+	xdp/headers/linux/bpf.h \
+	xdp/headers/linux/err.h \
+	xdp/headers/linux/if_link.h \
+	xdp/headers/perf-sys.h
+
 LLC ?= llc
 CLANG ?= clang
 CC ?= gcc
@@ -165,7 +175,7 @@ $(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
 # libxdp.${SHARED_LIBRARY_EXTENSION}: ${USER_OBJ}
 # 	$(CC) ${SHARED_LIBRARY_FLAG} -o $@ $^
 
-# EXTRA_DIST += $(USER_C) $(xdp_headers)
+EXTRA_DIST += $(USER_C) $(XDP_C) $(xdp_headers) $(helpers_headers)
 
 # if HAVE_XDP
 # dist_xdp_DATA += $(USER_OBJ)
