@@ -65,6 +65,8 @@
 #include "util.h"
 #include "uuid.h"
 
+#include "xdp-loader.h"
+
 /* ================================================================
     The xdp uses more or less the same datapath as netdev, only
     that it attaches a program on it. Hence the datapath shash  and
@@ -320,8 +322,8 @@ static struct dp_xdp_flow * dp_xdp_ep_find_flow(const struct dp_xdp_entry_point 
                         size_t key_len);
 static struct dpif_xdp_flow_dump * dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump);
 static struct dpif_xdp_flow_dump_thread * dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread);
-static void dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
-                        odp_port_t port_no);
+static int dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
+                        odp_port_t port_no, const char *devname);
 static void dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep);
 static bool dp_xdp_ep_try_ref(struct dp_xdp_entry_point *ep);
 static void dp_xdp_ep_unref(struct dp_xdp_entry_point *ep);
@@ -631,10 +633,13 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
     seq_change(dp->port_seq);
 
     // configure ep
-    dp_xdp_configure_ep(ep, dp, port_no);
-
+    error = dp_xdp_configure_ep(ep, dp, port_no, devname);
+    if (error) {
+        goto out;
+    }
     error = port_add_channel(dp, port_no);
 
+out:
     if (error) {
         do_del_port(dp, port);
     }
@@ -967,16 +972,32 @@ dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread)
 }
 
 /* Configures the 'ep' based on the input argument. */
-static void
+static int
 dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
-                        odp_port_t port_no)
+                        odp_port_t port_no, const char *devname)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
+    int error = 0;
+    ep->dp = dp;
+    ovs_refcount_init(&ep->ref_cnt);
+    ep->port_no = port_no;
+
+    /* load the xdp program */
+    error = xdp_load(devname);
+    if (error) {
+        goto out;
+    }
+
+    cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
+                hash_int(port_no, 0));
+
     /* TODO: implement method */
-
-    // cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
-    //             hash_int(port_no, 0));
-
+    
+out:
+    if (error) {
+        dp_xdp_destroy_ep(ep);
+    }
+    return error;
 }
 
 /* don't need to delete point since it the 

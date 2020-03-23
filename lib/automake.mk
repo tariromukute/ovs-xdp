@@ -428,7 +428,9 @@ endif
 if HAVE_XDP
 lib_libopenvswitch_la_SOURCES += \
 	lib/dpif-xdp.h \
-	lib/dpif-xdp.c 
+	lib/dpif-xdp.c \
+	lib/xdp-loader.c \
+	lib/xdp-loader.h
 endif
 
 if DPDK_NETDEV

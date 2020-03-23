@@ -27,6 +27,8 @@ AM_CPPFLAGS += -I $(top_srcdir)/include
 AM_CPPFLAGS += -I $(top_builddir)/include
 AM_CPPFLAGS += -I $(top_srcdir)/lib
 AM_CPPFLAGS += -I $(top_builddir)/lib
+AM_CPPFLAGS += -I $(top_builddir)/xdp
+AM_CPPFLAGS += -I $(top_srcdir)/xdp
 
 AM_CPPFLAGS += $(SSL_INCLUDES)
 
@@ -103,6 +105,7 @@ dist_pkgdata_SCRIPTS =
 dist_sbin_SCRIPTS =
 dist_scripts_SCRIPTS =
 dist_scripts_DATA =
+dist_xdp_DATA =
 EXTRA_PROGRAMS =
 INSTALL_DATA_LOCAL =
 UNINSTALL_LOCAL =
@@ -135,7 +138,10 @@ endif
 scriptsdir = $(pkgdatadir)/scripts
 completiondir = $(sysconfdir)/bash_completion.d
 pkgconfigdir = $(libdir)/pkgconfig
+xdpdir = $(pkgdatadir)/xdp
 
+$(info "================ RUNNING =======================")
+$(info $(xdpdir))
 # This ensures that files added to EXTRA_DIST are always distributed,
 # even if they are inside an Automake if...endif conditional block that is
 # disabled by some particular "configure" run.  For more information, see:
@@ -477,6 +483,7 @@ dist-docs:
 
 include Documentation/automake.mk
 include m4/automake.mk
+include xdp/automake.mk
 include lib/automake.mk
 include ofproto/automake.mk
 include utilities/automake.mk

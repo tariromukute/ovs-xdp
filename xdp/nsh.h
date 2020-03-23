@@ -4,6 +4,7 @@
 // #include <linux/skbuff.h>
 #include <linux/types.h>
 #include <linux/in.h>
+#include "bpf_endian.h"
 // #include <arpa/inet.h>
 /*
  * Network Service Header:

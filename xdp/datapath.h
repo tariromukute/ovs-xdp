@@ -4,12 +4,12 @@
 #include <linux/kernel.h>
 #include <linux/bpf.h>
 #include <linux/if_xdp.h>
-#include <linux/netdevice.h>
-#include <net/net_namespace.h>
-#include <net/ip_tunnels.h>
+// #include <linux/netdevice.h>
+// #include <net/net_namespace.h>
+// #include <net/ip_tunnels.h>
 
 #include "flow.h"
-#include "flow_table.h"
+#include "flow-table.h"
 
 struct datapath {
 
@@ -37,20 +37,20 @@ struct dp_upcall_info {
 	const struct nlattr *userdata;
 	const struct nlattr *actions;
 	int actions_len;
-	u32 portid;
-	u8 cmd;
-	u16 mru;
+	__u32 portid;
+	__u8 cmd;
+	__u16 mru;
 };
 
-void ovs_dp_process_packet(struct xdp_md *ctx, struct sw_flow_key *key);
+void ovs_dp_process_packet(struct xdp_md *ctx, struct xdp_flow_key *key);
 int ovs_dp_upcall(struct datapath *, struct xdp_md *,
-		  const struct sw_flow_key *, const struct dp_upcall_info *,
-		  uint32_t cutlen);
+		  const struct xdp_flow_key *, const struct dp_upcall_info *,
+		  __u32 cutlen);
 
 const char *ovs_dp_name(const struct datapath *dp);
 
 
 int ovs_execute_actions(struct datapath *dp, struct xdp_md *ctx,
-			const struct sw_flow_actions *, struct sw_flow_key *);
+			const struct xdp_flow_actions *, struct xdp_flow_key *);
 
 #endif /* datapath.h */

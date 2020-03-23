@@ -21,6 +21,7 @@
 *.suo
 **/*.sym
 *~
+*.ll
 *,cover
 .#*
 .*.cmd
