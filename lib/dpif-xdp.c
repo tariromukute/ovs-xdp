@@ -633,7 +633,9 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
     seq_change(dp->port_seq);
 
     // configure ep
-    error = dp_xdp_configure_ep(ep, dp, port_no, devname);
+    if (strcmp(devname, "ovs-xdp") != 0) {
+        error = dp_xdp_configure_ep(ep, dp, port_no, devname);
+    }
     if (error) {
         goto out;
     }
@@ -987,9 +989,8 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
     if (error) {
         goto out;
     }
-
     cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
-                hash_int(port_no, 0));
+                hash_int(odp_to_u32(port_no), 0));
 
     /* TODO: implement method */
     

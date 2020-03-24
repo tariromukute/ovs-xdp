@@ -98,6 +98,7 @@ struct bpf_object *__load_bpf_and_xdp_attach(struct config *cfg);
 
 int xdp_link_attach(int ifindex, __u32 xdp_flags, int prog_fd)
 {
+    VLOG_INFO("*** Called: %s ***", __func__);
     int err;
 
     /* libbpf provide the XDP net_device link-level hook attach helper */
@@ -107,7 +108,7 @@ int xdp_link_attach(int ifindex, __u32 xdp_flags, int prog_fd)
          * opposite type is loaded. Let's unload that and try loading
          * again.
          */
-
+        VLOG_INFO("*** Doing unload and reloading ***");
         __u32 old_flags = xdp_flags;
 
         xdp_flags &= ~XDP_FLAGS_MODES;
@@ -117,9 +118,9 @@ int xdp_link_attach(int ifindex, __u32 xdp_flags, int prog_fd)
             err = bpf_set_link_xdp_fd(ifindex, prog_fd, old_flags);
     }
     if (err < 0) {
-
         switch (-err) {
         case EBUSY:
+            break;
         case EEXIST:
             break;
         case EOPNOTSUPP:
@@ -221,6 +222,7 @@ struct bpf_object *__load_bpf_and_xdp_attach(struct config *cfg)
 
     err = xdp_link_attach(cfg->ifindex, cfg->xdp_flags, prog_fd);
     if (err) {
+        VLOG_INFO("ERR: link attach (%d)", err);
         exit(err);
     }
 
@@ -236,41 +238,44 @@ int xdp_load(const char *ifname)
         VLOG_INFO("ERR: the dev name was not provided");
         return EXIT_FAIL_OPTION;
     }
-    struct config *cfg;
-    cfg = malloc(sizeof *cfg);
-    cfg->xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE;
-    cfg->ifindex   = -1;
-    cfg->do_unload = false;
+    struct config cfg = {
+        .xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
+        .ifindex   = -1,
+        .do_unload = false,
+    };
+   
     /* Set default BPF-ELF object file and BPF program name */
-    strncpy(cfg->filename, default_filename, sizeof(cfg->filename));
-    strncpy(cfg->progsec,  default_progsec,  sizeof(cfg->progsec));
+    strncpy(cfg.filename, default_filename, sizeof(cfg.filename));
+    strncpy(cfg.progsec,  default_progsec,  sizeof(cfg.progsec));
     
-    cfg->ifname = (char *)&cfg->ifname_buf;
-    strncpy(cfg->ifname, ifname, IF_NAMESIZE);
-    cfg->ifindex = if_nametoindex(cfg->ifname);
-    if (cfg->ifindex == 0) {
+    cfg.ifname = (char *)&cfg.ifname_buf;
+    strncpy(cfg.ifname, ifname, IF_NAMESIZE);
+    cfg.ifindex = if_nametoindex(cfg.ifname);
+    if (cfg.ifindex == 0) {
         VLOG_INFO("ERR: --dev name (%s) unknown", ifname);
         return EXIT_FAIL_OPTION;
     }
 
     /* Required option */
-    if (cfg->ifindex == -1) {
+    if (cfg.ifindex == -1) {
         VLOG_INFO("ERR: --dev name (%s) ifindex not found", ifname);
         return EXIT_FAIL_OPTION;
     }
-    if (cfg->do_unload) {
+    if (cfg.do_unload) {
         // return xdp_link_detach(cfg->ifindex, cfg->xdp_flags, 0);
     }
 
-    bpf_obj = __load_bpf_and_xdp_attach(cfg);
+    bpf_obj = __load_bpf_and_xdp_attach(&cfg);
     if (!bpf_obj) {
+        VLOG_INFO(" Failed - XDP prog attached on device:%s(ifindex:%d)",
+            cfg.ifname, cfg.ifindex);
         return EXIT_FAIL_BPF;
     }
 
     VLOG_INFO("Success: Loaded BPF-object(%s) and used section(%s)",
-            cfg->filename, cfg->progsec);
+            cfg.filename, cfg.progsec);
     VLOG_INFO(" - XDP prog attached on device:%s(ifindex:%d)",
-            cfg->ifname, cfg->ifindex);
+            cfg.ifname, cfg.ifindex);
     
     /* Other BPF section programs will get freed on exit */
     return EXIT_OK;
