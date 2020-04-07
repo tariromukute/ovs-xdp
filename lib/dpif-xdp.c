@@ -131,6 +131,7 @@ struct dp_xdp {
  * if there is no difference should probably use the same. */
 struct dp_xdp_port {
     odp_port_t port_no;
+    int ifindex;
     bool dynamic_txqs;          /* If true XPS will be used. */
     bool need_reconfigure;      /* True if we should reconfigure netdev. */
     struct netdev *netdev;
@@ -570,6 +571,7 @@ port_create(const char *devname, const char *type,
     struct dp_xdp_port *port;
     enum netdev_flags flags;
     struct netdev *netdev;
+    int ifindex = -1;
 
     *portp = NULL;
 
@@ -578,6 +580,12 @@ port_create(const char *devname, const char *type,
     if (error) {
         return error;
     }
+
+    ifindex = if_nametoindex(devname);
+    if (ifindex == -1 || ifindex == 0) {
+        goto out;
+    }
+
     /* XXX reject non-Ethernet devices */
 
     netdev_get_flags(netdev, &flags);
@@ -589,6 +597,7 @@ port_create(const char *devname, const char *type,
 
     port = xzalloc(sizeof *port);
     port->port_no = port_no;
+    port->ifindex = ifindex;
     port->netdev = netdev;
     port->type = xstrdup(type);
     port->sf = NULL;

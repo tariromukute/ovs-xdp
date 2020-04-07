@@ -1,5 +1,5 @@
-#ifndef DATAPATH_H
-#define DATAPATH_H 1
+#ifndef XDP_DATAPATH_H
+#define XDP_DATAPATH_H 1
 
 #include <linux/kernel.h>
 #include <linux/bpf.h>
@@ -53,4 +53,4 @@ const char *ovs_dp_name(const struct datapath *dp);
 int ovs_execute_actions(struct datapath *dp, struct xdp_md *ctx,
             const struct xdp_flow_actions *, struct xdp_flow_key *);
 
-#endif /* datapath.h */
+#endif /* xdp_datapath.h */

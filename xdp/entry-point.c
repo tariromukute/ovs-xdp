@@ -1,111 +1,256 @@
-/**
- * The file contains the code/program that will listen in the kernel for
- * events. It programs are the entry point into the datapath. The calls
- * can be from the userspace (downcall) or some 'controller' or triggered
- * by an incoming packet at with point.
- *
- * The overal program for the following scenarios is a follows
- * 
- * 1) from an incoming packet
- *
- *    a) entry_point -> receives the packet, calls parse to get the flow 
- *
- *    b) flow -> parse the packet to get the flow, return to ep
- *
- *    c) entry_point -> send it to datapath
- *
- *    d) datapath -> check for flow key from flow_map/table
- *    
-      e) flow_map -> lookup and return if any
-
-      f) datapath -> return the attributes to 
-
-      g) entry_point -> check if it's among the implement actions and tail else upcall
-
-      h) ..entry_point -> if error anywhere drop packet
-
-      .... if upcall was required ....
-
-      . datapath -> format for upcall
-      
-      . flow_xdp -> change the xdp flow to the nattlr expected by userspace daemon
-
-      . datapath -> return code and metadata to upcall with AF_XDP
-
-      . entry_point -> upcall
-
-   2) downcall
-
-      a) entry_point -> get the packet and metadata needed
-
-      b) datapath -> extract the ovs format and convert to flow
-
-      c) xlate -> convert ovs and produce xdp flow + actions
-
-      d) datapath -> if everything ok get the ufid
-
-      e) flow -> return the ufid
-
-      d) datapath -> if everything ok store flow and key and actions
-
-      e) flow_map -> store the entry
-
-      f) datapath -> send a result back
-
-      h) entry-point -> acknowledge or respond to error appropriately
-
-   3) Set up information from controller
-
-      ....This haven't completely thought through but an option is to use the already
-      existing netlink to set up and trigger the setup etc..... 
-      
-      ...using a single tap devices can be used, however the tap device or bridge will
-      need to be created. Guess that's what netdev is for....
- * 
- */
-
-
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/bpf.h>
+#include <linux/bpf.h>
+#include <linux/openvswitch.h>
+#include <crypt.h>
+#include <linux/cryptouser.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <net/if_arp.h>
 #include "bpf_helpers.h"
+#include "bpf_endian.h"
+#include "nsh.h"
 #include "flow.h"
+#include "tail_actions.h"
 
-struct bpf_map_def SEC("maps") flow_map = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = (sizeof(struct xdp_flow_id)),
-    .value_size = (sizeof(struct xdp_flow)),
-    .max_entries = 256,
-};
+#include "parsing_helpers.h"
+#include "rewrite_helpers.h"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
+#ifndef memcpy
+#define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
+#endif
+
+#define bpf_printk(fmt, ...)                       \
+    ({                                             \
+        char ____fmt[] = fmt;                      \
+        bpf_trace_printk(____fmt, sizeof(____fmt), \
+                         ##__VA_ARGS__);           \
+    })
+
 SEC("process")
 int xdp_process(struct xdp_md *ctx)
 {
-    /* TODO: implement method */
+    int action = XDP_PASS;
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+    /* These keep track of the next header type and iterator pointer */
+    struct hdr_cursor nh;
+    struct xdp_flow_key key;
+    struct xdp_flow *flow;
+    nh.pos = data;
+    // int err;
 
-    /* Receives incoming packets and then sends to flow to compute
-       the flow details e.g. flow_key. Then sends to datapath to process
-       the packet. Datapath returns the flow and it's actions, with error
-       0 or NFF for upcall miss or internal error for logging and dropping
-       the packet.
+    // initialise to avoid unbound error during load
+    memset(&key, 0, sizeof(struct xdp_flow_key));
 
-       It then checks of the actions can be implemented on the fast path
-       if so it tails the actions else if upcalls for userspace processing.
+    /* Parse and extract the xdp_flow_key */
+    /* NOTE: putting this in a separate method e.g., key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_flow_key *key)
+     * was working but the moment I added bpf_tail_call the program was failing to load. I commented out some parts of the method
+     * and then it started working but then could not extract the whole key. Moving some methods for e.g., parse_iphdr and putting
+     * them directly into key_extract allowed for more instruction to be loaded but again could not have all the key being extracted.
+     * However moving the whole metho key_extract and putting it directly here allowed for the program to be loaded. Not sure what
+     * the cause for the error is but might be the limit to the maximum number of subsequent branches. However could not find the 
+     * number and the number didn't seem to be linear either. So it might be something else */
+    int nh_type;
+    struct ethhdr *eth; // = &key.eth;
+    nh_type = parse_ethhdr(&nh, data_end, &eth);
+    if (nh_type < 0)
+    {
+        goto out;
+    }
+    memcpy(&key.eth, eth, sizeof(key.eth));
 
-       If upcall miss is required it will upcall the to userspace. 
+    /* Network layer. */
+    if (nh_type == ETH_P_IP)
+    {
+        struct iphdr *iph = &key.iph;
+        nh_type = parse_iphdr(&nh, data_end, &iph);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
 
-       If error it will drop the packet and log the operation. 
-       
-       If any error occurs from the tailed fuctions the packets will be dropped.*/
-    return XDP_PASS; 
+        memcpy(&key.iph, iph, sizeof(struct iphdr));
+
+        /* Transport layer. */
+        if (nh_type == IPPROTO_TCP)
+        {
+            struct tcphdr *tcph = &key.tcph;
+            nh_type = parse_tcphdr(&nh, data_end, &tcph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+
+            memcpy(&key.tcph, tcph, sizeof(struct tcphdr));
+        }
+        else if (nh_type == IPPROTO_UDP)
+        {
+            struct udphdr *udph = &key.udph;
+            nh_type = parse_udphdr(&nh, data_end, &udph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+
+            memcpy(&key.udph, udph, sizeof(struct udphdr));
+        }
+        else if (nh_type == IPPROTO_SCTP)
+        {
+            /* TODO: implement code */
+        }
+        else if (nh_type == IPPROTO_ICMP)
+        {
+            struct icmphdr *icmph = &key.icmph;
+            nh_type = parse_icmphdr(&nh, data_end, &icmph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+
+            memcpy(&key.icmph, icmph, sizeof(struct icmphdr));
+        }
+    }
+    else if (nh_type == ETH_P_ARP || nh_type == ETH_P_RARP)
+    {
+
+        /* TODO: implement code */
+    }
+    else if (nh_type == ETH_P_MPLS_MC || nh_type == ETH_P_MPLS_UC)
+    {
+
+        /* TODO: implement code */
+    }
+    else if (nh_type == ETH_P_IPV6)
+    {
+        struct ipv6hdr *ip6h;
+        nh_type = parse_ip6hdr(&nh, data_end, &ip6h);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
+
+        memcpy(&key.ipv6h, ip6h, sizeof(struct ipv6hdr));
+
+        /* Transport layer. */
+        if (nh_type == IPPROTO_TCP)
+        {
+            struct tcphdr *tcph;
+            nh_type = parse_tcphdr(&nh, data_end, &tcph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+
+            // memcpy(&key.tcph, tcph, sizeof(struct tcphdr)); // TODO: emiting this for now
+        }
+        else if (nh_type == IPPROTO_UDP)
+        {
+            struct udphdr *udph;
+            nh_type = parse_udphdr(&nh, data_end, &udph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+
+            // memcpy(&key.udph, udph, sizeof(struct udphdr)); // TODO: emiting this for now
+        }
+        else if (nh_type == IPPROTO_SCTP)
+        {
+            /* TODO: implement code */
+        }
+        else if (nh_type == IPPROTO_ICMPV6)
+        {
+            struct icmp6hdr *icmp6h;
+            nh_type = parse_icmp6hdr(&nh, data_end, &icmp6h);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+
+            memcpy(&key.icmp6h, icmp6h, sizeof(struct icmp6hdr));
+        }
+    }
+    else if (nh_type == ETH_P_NSH)
+    {
+        struct nshhdr *nshh;
+        nh_type = parse_nshhdr(&nh, data_end, &nshh);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
+
+        memcpy(&key.nshh, nshh, sizeof(struct nshhdr));
+    }
+
+    key.valid = 1;
+
+    flow = bpf_map_lookup_elem(&_flow_table, &key);
+    if (!flow)
+    {
+        bpf_printk("Upcall needed\n");
+        action = XDP_PASS; // Upcall
+        /* TODO: remove, for dev testing only */
+        struct xdp_flow_key k;
+        // initialise to avoid unbound error during load
+        memset(&k, 0, sizeof(struct xdp_flow_key));
+        bpf_printk("trying the dummy key and actions\n");
+        flow = bpf_map_lookup_elem(&_flow_table, &k);
+        if(!flow) {
+            bpf_printk("User program did not initialise map\n");
+            goto out;
+        }
+    }
+
+    struct act_cursor cur;
+    memcpy(&cur, &flow->actions.data[0], sizeof(struct act_cursor));
+    bpf_printk("type is: %x\n", cur.type);
+    int k = 0;
+    if (bpf_map_update_elem(&_percpu_actions, &k, &flow->actions, 0))
+    {
+        bpf_printk("Could not update percpu_actions map\n");
+        goto out;
+    }
+
+    /* NOTE: Could not pass the array inside the struct flow.actions.data 
+     * the program was failing at load time. Not sure what the cause was 
+     * as the flow was initialised by memset hence should pass the bound 
+     * check. Passing an independant array worked so designed it around that 
+     * */
+    struct flow_metadata fm_cpy;
+    memset(&fm_cpy, 0, sizeof(struct flow_metadata));
+    fm_cpy.pos = 0;
+    fm_cpy.offset = 0;
+    fm_cpy.key = key;
+    memcpy(&fm_cpy.key, &key, sizeof(struct xdp_flow_key));
+    fm_cpy.len = 4 + sizeof(struct xdp_flow_key);
+
+    struct flow_metadata *fm = nh.pos;
+    if (bpf_xdp_adjust_head(ctx, 0 - (int)fm_cpy.len))
+        goto out;
+
+    /* Need to re-evaluate data_end and data after head adjustment, and
+	 * bounds check, even though we know there is enough space (as we
+	 * increased it).
+	 */
+    data_end = (void *)(long)ctx->data_end;
+    fm = (void *)(long)ctx->data;
+
+    
+    if (fm + 1 > data_end)
+    {
+        action = XDP_DROP; // error should not occur, but if for some weird reason it does drop packet
+        goto out;
+    }
+
+    memcpy(fm, &fm_cpy, sizeof(*fm));
+
+    action = XDP_DROP; // if program fails after changing the ctx drop packet as it will be dropped
+    
+    tail_action(ctx);
+out:
+    bpf_printk("xdp_process - tail failed\n");
+    return action;
 }
-
-SEC("xdp")
-int  xdp_downcall(struct xdp_md *ctx)
-{
-    return XDP_DROP;
-}
-#pragma GCC diagnostic pop
 
 char _license[] SEC("license") = "GPL";
