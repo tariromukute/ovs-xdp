@@ -17,10 +17,9 @@
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
 #include "nsh.h"
-// #include "bpf_helpers.h"
 #include "flow.h"
 
-#include "../common/parsing_helpers.h"
+#include "parsing_helpers.h"
 
 /* Action header cursor to keep track of current parsing position */
 struct act_cursor {

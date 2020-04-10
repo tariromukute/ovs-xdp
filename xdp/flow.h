@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <net/if_arp.h>
 #include "bpf_endian.h"
 #include "nsh.h"
@@ -132,9 +133,16 @@ ovs_action_attr_list[OVS_ACTION_ATTR_MAX + 1] = {
 	[OVS_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE"},
 };
 
+enum sw_flow_mac_proto {
+	MAC_PROTO_NONE = 0,
+	MAC_PROTO_ETHERNET,
+};
+
+#define XDP_FLOW_KEY_INVALID	0x80
+
 static inline __u8 ovs_key_mac_proto(const struct xdp_flow_key *key)
 {
-    return key->eth->h_proto & ~XDP_FLOW_KEY_INVALID;
+    return key->eth.h_proto & ~XDP_FLOW_KEY_INVALID;
 }
 
 static inline __u16 __ovs_mac_header_len(__u8 mac_proto)

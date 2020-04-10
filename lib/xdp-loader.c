@@ -5,19 +5,13 @@
 #include <string.h>
 #include <errno.h>
 #include <getopt.h>
-#include <linux/bpf.h>
-#include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <linux/if_link.h>
 #include <net/if.h>
 #include <errno.h>
-#include <linux/err.h>
 #include <unistd.h>
 #include <linux/openvswitch.h>
 #include "xdp/flow.h"
-
-#include <bpf/bpf.h>
-#include <bpf/libbpf.h>
 
 #include <net/if.h>
 // #include <linux/if_link.h> /* depend on kernel-headers installed */
@@ -32,41 +26,14 @@ VLOG_DEFINE_THIS_MODULE(xdp_loader);
 #define IF_NAMESIZE    16
 
 /* XDP section */
-/* This section is implemented in <linux/if_link.h> but including it is
-   resulting in a redefinition error with netlink */
+/* NOTE: bpf_get_link_xdp_id, bpf_set_link_xdp_id and bpf_object__for_each_map possibly
+ * among many other functions are not present in <bpf/libbpf.h> in other kernel versions
+ * e.g v5.0 therefore this implementation is suited for versions that support it. */
 
-#define XDP_FLAGS_UPDATE_IF_NOEXIST    (1U << 0)
-#define XDP_FLAGS_SKB_MODE        (1U << 1)
-#define XDP_FLAGS_DRV_MODE        (1U << 2)
-#define XDP_FLAGS_HW_MODE        (1U << 3)
-#define XDP_FLAGS_MODES            (XDP_FLAGS_SKB_MODE | \
-                     XDP_FLAGS_DRV_MODE | \
-                     XDP_FLAGS_HW_MODE)
-#define XDP_FLAGS_MASK            (XDP_FLAGS_UPDATE_IF_NOEXIST | \
-                     XDP_FLAGS_MODES)
+/* NOTE: support for af_xdp is limited in other kernel versions. Our implemetation of is
+ * going to make use of libbpf and relies on attritubes that are only introduced in v5.3+
+ * so should ideally use v5.4 for development and testing. */
 
-/* These are stored into IFLA_XDP_ATTACHED on dump. */
-enum {
-    XDP_ATTACHED_NONE = 0,
-    XDP_ATTACHED_DRV,
-    XDP_ATTACHED_SKB,
-    XDP_ATTACHED_HW,
-    XDP_ATTACHED_MULTI,
-};
-
-enum {
-    IFLA_XDP_UNSPEC,
-    IFLA_XDP_FD,
-    IFLA_XDP_ATTACHED,
-    IFLA_XDP_FLAGS,
-    IFLA_XDP_PROG_ID,
-    IFLA_XDP_DRV_PROG_ID,
-    IFLA_XDP_SKB_PROG_ID,
-    IFLA_XDP_HW_PROG_ID,
-    __IFLA_XDP_MAX,
-};
-
-#define IFLA_XDP_MAX (__IFLA_XDP_MAX - 1)
 
 struct config {
     __u32 xdp_flags;
@@ -88,31 +55,15 @@ struct config {
     bool xsk_poll_mode;
 };
 
-/* Exit return codes */
-#define EXIT_OK          0 /* == EXIT_SUCCESS (stdlib.h) man exit(3) */
-#define EXIT_FAIL         1 /* == EXIT_FAILURE (stdlib.h) man exit(3) */
-#define EXIT_FAIL_OPTION     2
-#define EXIT_FAIL_XDP        30
-#define EXIT_FAIL_BPF        40
-
-static const char *default_filename = "/home/xdpovs/ovs-xdp/xdp/entry-point.o";
-static const char *default_progsec = "process";
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-
-/* Exit return codes */
-#define EXIT_OK 0   /* == EXIT_SUCCESS (stdlib.h) man exit(3) */
-#define EXIT_FAIL 1 /* == EXIT_FAILURE (stdlib.h) man exit(3) */
-#define EXIT_FAIL_OPTION 2
-#define EXIT_FAIL_XDP 30
-#define EXIT_FAIL_BPF 40
-
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
-static const char *default_filename = "xdp_prog_kern.o";
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+
+static const char *default_filename = "/home/xdpovs/ovs-xdp/xdp/entry-point.o";
+static const char *default_progsec = "process";
 static const char *action_filename = "actions.o";
 const char *pin_basedir = "/sys/fs/bpf";
 const char *prog_pin_dir = "/sys/fs/bpf/prog";
@@ -177,7 +128,7 @@ static int reuse_reuseable_maps(struct bpf_object *obj, const char *subdir)
 
         if (bpf_map__name(map)[1] == '_')
         { // global map
-            len = snVLOG_INFO(pin_dir, PATH_MAX, "%s", pin_basedir);
+            len = snprintf(pin_dir, PATH_MAX, "%s", pin_basedir);
             if (len < 0)
             {
                 return -EINVAL;
@@ -189,7 +140,7 @@ static int reuse_reuseable_maps(struct bpf_object *obj, const char *subdir)
         }
         else
         { // interface/entry point map
-            len = snVLOG_INFO(pin_dir, PATH_MAX, "%s/%s", pin_basedir, subdir);
+            len = snprintf(pin_dir, PATH_MAX, "%s/%s", pin_basedir, subdir);
             if (len < 0)
             {
                 return -EINVAL;
@@ -201,7 +152,7 @@ static int reuse_reuseable_maps(struct bpf_object *obj, const char *subdir)
         }
 
         // check if map already pinned
-        len = snVLOG_INFO(buf, PATH_MAX, "%s/%s", pin_dir, bpf_map__name(map));
+        len = snprintf(buf, PATH_MAX, "%s/%s", pin_dir, bpf_map__name(map));
         if (len < 0)
         {
             return -EINVAL;
@@ -242,7 +193,7 @@ static int pin_unpinned_maps(struct bpf_object *obj, const char *subdir)
 
         if (bpf_map__name(map)[1] == '_')
         { // global map
-            len = snVLOG_INFO(pin_dir, PATH_MAX, "%s", pin_basedir);
+            len = snprintf(pin_dir, PATH_MAX, "%s", pin_basedir);
             if (len < 0)
             {
                 return -EINVAL;
@@ -254,7 +205,7 @@ static int pin_unpinned_maps(struct bpf_object *obj, const char *subdir)
         }
         else
         { // interface/entry point map
-            len = snVLOG_INFO(pin_dir, PATH_MAX, "%s/%s", pin_basedir, subdir);
+            len = snprintf(pin_dir, PATH_MAX, "%s/%s", pin_basedir, subdir);
             if (len < 0)
             {
                 return -EINVAL;
@@ -266,7 +217,7 @@ static int pin_unpinned_maps(struct bpf_object *obj, const char *subdir)
         }
 
         // check if map already pinned
-        len = snVLOG_INFO(buf, PATH_MAX, "%s/%s", pin_dir, bpf_map__name(map));
+        len = snprintf(buf, PATH_MAX, "%s/%s", pin_dir, bpf_map__name(map));
         if (len < 0)
         {
             return -EINVAL;
@@ -317,7 +268,7 @@ int xdp_load(const char *ifname)
     obj = open_bpf_object(default_filename, 0);
     if (!obj)
     {
-        fVLOG_INFO(stderr, "ERR: failed to open object %s\n", default_filename);
+        VLOG_INFO("ERR: failed to open object %s\n", default_filename);
         return EXIT_FAIL;
     }
 
@@ -335,7 +286,7 @@ int xdp_load(const char *ifname)
         return err;
     }
 
-    bpf_prog = bpf_object__find_program_by_title(obj, "process");
+    bpf_prog = bpf_object__find_program_by_title(obj, default_progsec);
     if (!bpf_prog)
     {
         VLOG_INFO("Could not find prog");
@@ -396,7 +347,7 @@ int xdp_load(const char *ifname)
 
     int len;
     char dir[PATH_MAX];
-    len = snVLOG_INFO(dir, PATH_MAX, "%s/%s/%s", pin_basedir, ifname, "prog");
+    len = snprintf(dir, PATH_MAX, "%s/%s/%s", pin_basedir, ifname, "prog");
     if (len < 0)
     {
         return -EINVAL;
@@ -418,7 +369,7 @@ int xdp_load(const char *ifname)
     {
         char buf[PATH_MAX];
 
-        len = snVLOG_INFO(buf, PATH_MAX, "%s/%s/%s/%s", pin_basedir, ifname, "prog", ovs_action_attr_list[i].name);
+        len = snprintf(buf, PATH_MAX, "%s/%s/%s/%s", pin_basedir, ifname, "prog", ovs_action_attr_list[i].name);
         if (len < 0)
         {
             return -EINVAL;
@@ -433,6 +384,8 @@ int xdp_load(const char *ifname)
         VLOG_INFO("Prog FD: %d\n", prog_fd);
         bpf_map_update_elem(map_fd, &i, &prog_fd, 0);
     }
+
+    return EXIT_OK;
 
 }
 

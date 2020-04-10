@@ -989,24 +989,24 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     int error = 0;
-    ep->dp = dp;
-    ovs_refcount_init(&ep->ref_cnt);
-    ep->port_no = port_no;
+//     ep->dp = dp;
+//     ovs_refcount_init(&ep->ref_cnt);
+//     ep->port_no = port_no;
 
-    /* load the xdp program */
-    error = xdp_load(devname);
-    if (error) {
-        goto out;
-    }
-    cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
-                hash_int(odp_to_u32(port_no), 0));
+//     /* load the xdp program */
+//     error = xdp_load(devname);
+//     if (error) {
+//         goto out;
+//     }
+//     cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
+//                 hash_int(odp_to_u32(port_no), 0));
 
-    /* TODO: implement method */
+//     /* TODO: implement method */
     
-out:
-    if (error) {
-        dp_xdp_destroy_ep(ep);
-    }
+// out:
+//     if (error) {
+//         dp_xdp_destroy_ep(ep);
+//     }
     return error;
 }
 
@@ -2072,7 +2072,7 @@ static int
 dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
                 struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct xdp_handler *handler;
     int error;
@@ -2094,7 +2094,7 @@ out:
 static void                     
 dpif_xdp_recv_wait(struct dpif *dpif, uint32_t handler_id)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dp_xdp *dp = get_dp_xdp(dpif);
 
     fat_rwlock_rdlock(&dp->upcall_lock);

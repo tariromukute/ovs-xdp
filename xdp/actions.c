@@ -9,8 +9,8 @@
 #include "tail_actions.h"
 
 // The parsing helper functions from the packet01 lesson have moved here
-#include "../common/parsing_helpers.h"
-#include "../common/rewrite_helpers.h"
+#include "parsing_helpers.h"
+#include "rewrite_helpers.h"
 
 #ifndef memcpy
 #define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))

@@ -29,6 +29,7 @@ AM_CPPFLAGS += -I $(top_srcdir)/lib
 AM_CPPFLAGS += -I $(top_builddir)/lib
 AM_CPPFLAGS += -I $(top_builddir)/xdp
 AM_CPPFLAGS += -I $(top_srcdir)/xdp
+AM_CPPFLAGS += -I $(top_srcdir)/xdp/headers
 
 AM_CPPFLAGS += $(SSL_INCLUDES)
 

@@ -80,25 +80,27 @@ XDP_TARGETS = \
 USER_TARGETS = \
 	xdp/datapath \
 	xdp/flow \
-	xdp/xlate \
 	xdp/flow-table
 
 xdp_headers = \
 	xdp/datapath.h \
 	xdp/flow.h \
-	xdp/xlate.h \
 	xdp/flow-table.h \
-	xdp/nsh.h
+	xdp/tail_actions.h
 
 helpers_headers = \
 	xdp/headers/bpf_endian.h \
 	xdp/headers/bpf_helpers.h \
 	xdp/headers/bpf_util.h \
+	xdp/headers/common_helpers.h \
 	xdp/headers/jhash.h \
+	xdp/headers/nsh.h \
+	xdp/headers/parsing_helpers.h \
+	xdp/headers/perf-sys.h \
+	xdp/headers/rewrite_helpers.h \
 	xdp/headers/linux/bpf.h \
 	xdp/headers/linux/err.h \
-	xdp/headers/linux/if_link.h \
-	xdp/headers/perf-sys.h
+	xdp/headers/linux/if_link.h
 
 LLC ?= llc
 CLANG ?= clang
@@ -119,7 +121,7 @@ EXTRA_DEPS +=
 XCFLAGS =
 # XCFLAGS ?= -I$(LIBBPF_DIR)/root/usr/include/ -g
 # Extra include for Ubuntu issue #44
-XCFLAGS += -I/usr/include/x86_64-linux-gnu
+# XCFLAGS += -I/usr/include/x86_64-linux-gnu
 XCFLAGS += -Ixdp/headers/
 LDFLAGS ?= -L$(LIBBPF_DIR)
 
