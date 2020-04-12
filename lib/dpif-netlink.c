@@ -2441,11 +2441,14 @@ dpif_netlink_recv_set__(struct dpif_netlink *dpif, bool enable)
     OVS_REQ_WRLOCK(dpif->upcall_lock)
 {
     if ((dpif->handlers != NULL) == enable) {
+        VLOG_INFO("---- Called: %s -- first ----", __func__);
         return 0;
     } else if (!enable) {
+        VLOG_INFO("---- Called: %s -- second ----", __func__);
         destroy_all_channels(dpif);
         return 0;
     } else {
+        VLOG_INFO("---- Called: %s -- third ----", __func__);
         return dpif_netlink_refresh_channels(dpif, 1);
     }
 }
@@ -2453,6 +2456,7 @@ dpif_netlink_recv_set__(struct dpif_netlink *dpif, bool enable)
 static int
 dpif_netlink_recv_set(struct dpif *dpif_, bool enable)
 {
+    VLOG_INFO("---- Called: %s -- enable: %d ----", __func__, enable);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     int error;
 
@@ -2466,6 +2470,7 @@ dpif_netlink_recv_set(struct dpif *dpif_, bool enable)
 static int
 dpif_netlink_handlers_set(struct dpif *dpif_, uint32_t n_handlers)
 {
+    VLOG_INFO("---- Called: %s -- n_handlers: %d ----", __func__, n_handlers);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     int error = 0;
 
@@ -2727,6 +2732,7 @@ static int
 dpif_netlink_recv(struct dpif *dpif_, uint32_t handler_id,
                   struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     int error;
 

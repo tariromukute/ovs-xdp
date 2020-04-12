@@ -776,6 +776,8 @@ create_dpif_xdp(struct dp_xdp *dp)
     dpif = xmalloc(sizeof *dpif);
     dpif_init(&dpif->dpif, dp->class, dp->name, netflow_id >> 8, netflow_id);
     dpif->dp = dp;
+    fat_rwlock_init(&dp->upcall_lock);
+    dp->n_handlers = 1;
     VLOG_INFO("---- before seq_read: %s ----", __func__);
     dpif->last_port_seq = seq_read(dp->port_seq);
     VLOG_INFO("---- after seq_read: %s ----", __func__);
@@ -1616,7 +1618,8 @@ dpif_xdp_destroy(struct dpif *dpif)
 static bool
 dpif_xdp_run(struct dpif *dpif)
 {
-    // VLOG_INFO("---- Called: %s ----", __func__);
+    struct dp_xdp *dp = get_dp_xdp(dpif);
+    VLOG_INFO("---- Called: %s -- n_handlers: %d ----", __func__, dp->n_handlers);
     /* TODO: check if this is needed for now returning
        false indicating that there is no periodic work 
        needed to be done. */
@@ -2033,7 +2036,7 @@ dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
 static int
 dpif_xdp_recv_set(struct dpif *dpif, bool enable)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s -- enable: %d ----", __func__, enable);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     int error;
 

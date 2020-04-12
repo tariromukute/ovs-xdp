@@ -23,16 +23,16 @@
 
 /* Action header cursor to keep track of current parsing position */
 struct act_cursor {
-	__u8 type; /* Determine the type of attr - enum ovs_action_attr*/
+    __u8 type; /* Determine the type of attr - enum ovs_action_attr*/
     __u8 len; /* len of the whole xdp_flow_action as a multiple of u8 */
 };
 
 struct bpf_map_def SEC("maps") _tail_table = {
-	.type = BPF_MAP_TYPE_PROG_ARRAY,
-	// .type = BPF_MAP_TYPE_PERCPU_HASH,
-	.key_size = sizeof(__u32),
-	.value_size = sizeof(__u32),
-	.max_entries = OVS_ACTION_ATTR_MAX,
+    .type = BPF_MAP_TYPE_PROG_ARRAY,
+    // .type = BPF_MAP_TYPE_PERCPU_HASH,
+    .key_size = sizeof(__u32),
+    .value_size = sizeof(__u32),
+    .max_entries = OVS_ACTION_ATTR_MAX,
 };
 
 struct bpf_map_def SEC("maps") _percpu_actions = {
@@ -56,16 +56,16 @@ static __always_inline int parse_flow_metadata(struct hdr_cursor *nh,
                                        void *data_end,
                                        struct flow_metadata **fmhdr)
 {
-	struct flow_metadata *fmh = nh->pos;
+    struct flow_metadata *fmh = nh->pos;
 
-	if (fmh + 1 > data_end)
-		return -1;
+    if (fmh + 1 > data_end)
+        return -1;
 
 
-	nh->pos = fmh + 1;
-	*fmhdr = fmh;
+    nh->pos = fmh + 1;
+    *fmhdr = fmh;
 
-	return 0;
+    return 0;
 }
 
 static __always_inline int next_action(struct flow_metadata *fm)
@@ -81,23 +81,23 @@ static __always_inline int next_action(struct flow_metadata *fm)
         return -1;
     }
 
-	/* NOTE: 2 is sizeof(struct act_cursor), for some reason putting causes the program
-	 * to fail to load. When you change the struct act_cursor also change the 2 below.  */
-	int next_offset = fm->offset + 2;
-	
-	// check if there is another action
-	if (next_offset > actions->len) {
+    /* NOTE: 2 is sizeof(struct act_cursor), for some reason putting causes the program
+     * to fail to load. When you change the struct act_cursor also change the 2 below.  */
+    int next_offset = fm->offset + 2;
+    
+    // check if there is another action
+    if (next_offset > actions->len) {
         return -1;
     }
 
-	// bound check
+    // bound check
     if (fm->offset + sizeof(struct act_cursor) > sizeof(actions->data)) {
         return -1;
     }
 
     memcpy(&cur, &actions->data[fm->offset], sizeof(struct act_cursor));
     fm->offset += cur.len;
-	fm->pos += 1;
+    fm->pos += 1;
     return cur.type; 
 }
 
@@ -105,51 +105,51 @@ static __always_inline void tail_action(struct xdp_md *ctx)
 {
     /* TODO: Implement method */
 
-	void *data_end = (void *)(long)ctx->data_end;
-	void *data = (void *)(long)ctx->data;
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
 
     struct hdr_cursor nh;
-	struct flow_metadata *fm;
+    struct flow_metadata *fm;
 
-	/* These keep track of the next header type and iterator pointer */
-	nh.pos = data;
+    /* These keep track of the next header type and iterator pointer */
+    nh.pos = data;
 
-	/* Parse xdp flow metadata */
-	if (!parse_flow_metadata(&nh, data_end, &fm)) {
-		bpf_printk("flow_metadata before next_action pos %x\n", fm->pos);
-		bpf_printk("flow_metadata before next_action offset %x\n", fm->offset);
-		int flow_action = next_action(fm);
-		bpf_printk("flow_metadata after next_action pos %x\n", fm->pos);
-		bpf_printk("flow_metadata after next_action offset %x\n", fm->offset);
-		bpf_printk("flow_action is: %d\n", flow_action);
-		if (flow_action > 0 && flow_action < OVS_ACTION_ATTR_MAX) {
-			bpf_tail_call(ctx, &_tail_table, flow_action);
-		}    
+    /* Parse xdp flow metadata */
+    if (!parse_flow_metadata(&nh, data_end, &fm)) {
+        bpf_printk("flow_metadata before next_action pos %x\n", fm->pos);
+        bpf_printk("flow_metadata before next_action offset %x\n", fm->offset);
+        int flow_action = next_action(fm);
+        bpf_printk("flow_metadata after next_action pos %x\n", fm->pos);
+        bpf_printk("flow_metadata after next_action offset %x\n", fm->offset);
+        bpf_printk("flow_action is: %d\n", flow_action);
+        if (flow_action > 0 && flow_action < OVS_ACTION_ATTR_MAX) {
+            bpf_tail_call(ctx, &_tail_table, flow_action);
+        }    
 
     } else {
-		bpf_printk("flow-metadata parse failed\n");
-	}
+        bpf_printk("flow-metadata parse failed\n");
+    }
 
-	// bpf_tail_call(ctx, &_tail_table, 1);
+    // bpf_tail_call(ctx, &_tail_table, 1);
     
 }
 
 static __always_inline int add_actions(struct xdp_md *ctx, 
-				struct xdp_flow_actions *acts, struct xdp_flow_id *id)
+                struct xdp_flow_actions *acts, struct xdp_flow_id *id)
 {
     /* TODO: Implement method */
 
-	// get the length of the actions
+    // get the length of the actions
 
-	// create flow_metadata
+    // create flow_metadata
 
-	// get size of flow_metadata
+    // get size of flow_metadata
 
-	// tail grow the ctx by the size
+    // tail grow the ctx by the size
 
-	// add the flow_metadata to the ctx
+    // add the flow_metadata to the ctx
 
-	// return function with no error
+    // return function with no error
     return 0;
 }
 
@@ -157,21 +157,21 @@ static __always_inline int remove_actions(struct xdp_md *ctx)
 {
     /* TODO: Implement method */
 
-	// read the flow_metadata on the ctx
+    // read the flow_metadata on the ctx
 
-	// get the length of the flow_metadata
+    // get the length of the flow_metadata
 
-	// shrink the ctx by size of metadata
+    // shrink the ctx by size of metadata
 
-	// return success if no error
+    // return success if no error
     return 0;
 }
 
 static __always_inline __u8 has_next(struct xdp_md *ctx)
 {
-	/* TODO: Implement method */
+    /* TODO: Implement method */
 
-	// if offset is less than len return true, if equal return false
+    // if offset is less than len return true, if equal return false
 
     return 0;
 }

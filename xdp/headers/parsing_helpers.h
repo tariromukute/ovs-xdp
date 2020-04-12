@@ -31,17 +31,17 @@
 
 /* Header cursor to keep track of current parsing position */
 struct hdr_cursor {
-	void *pos;
+    void *pos;
 };
 
 /*
- * 	struct vlan_hdr - vlan header
- * 	@h_vlan_TCI: priority and VLAN ID
- *	@h_vlan_encapsulated_proto: packet type ID or len
+ *     struct vlan_hdr - vlan header
+ *     @h_vlan_TCI: priority and VLAN ID
+ *    @h_vlan_encapsulated_proto: packet type ID or len
  */
 struct vlan_hdr {
-	__be16	h_vlan_TCI;
-	__be16	h_vlan_encapsulated_proto;
+    __be16    h_vlan_TCI;
+    __be16    h_vlan_encapsulated_proto;
 };
 
 /*
@@ -49,9 +49,9 @@ struct vlan_hdr {
  * structures.
  */
 struct icmphdr_common {
-	__u8		type;
-	__u8		code;
-	__sum16		cksum;
+    __u8        type;
+    __u8        code;
+    __sum16        cksum;
 };
 
 /* Allow users of header file to redefine VLAN max depth */
@@ -71,22 +71,22 @@ static __always_inline int proto_is_vlan(__u16 h_proto)
  * VLAN tagged packet.
  */
 static __always_inline int parse_ethhdr(struct hdr_cursor *nh, void *data_end,
-					struct ethhdr **ethhdr)
+                    struct ethhdr **ethhdr)
 {
-	struct ethhdr *eth = nh->pos;
-	int hdrsize = sizeof(*eth);
+    struct ethhdr *eth = nh->pos;
+    int hdrsize = sizeof(*eth);
         struct vlan_hdr *vlh;
         __u16 h_proto;
         int i;
 
-	/* Byte-count bounds check; check if current pointer + size of header
-	 * is after data_end.
-	 */
-	if (nh->pos + hdrsize > data_end)
-		return -1;
+    /* Byte-count bounds check; check if current pointer + size of header
+     * is after data_end.
+     */
+    if (nh->pos + hdrsize > data_end)
+        return -1;
 
-	nh->pos += hdrsize;
-	*ethhdr = eth;
+    nh->pos += hdrsize;
+    *ethhdr = eth;
         vlh = nh->pos;
         h_proto = eth->h_proto;
 
@@ -106,37 +106,37 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh, void *data_end,
         }
 
         nh->pos = vlh;
-	return bpf_ntohs(h_proto);
+    return bpf_ntohs(h_proto);
 }
 
 static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
-					void *data_end,
-					struct ipv6hdr **ip6hdr)
+                    void *data_end,
+                    struct ipv6hdr **ip6hdr)
 {
-	struct ipv6hdr *ip6h = nh->pos;
+    struct ipv6hdr *ip6h = nh->pos;
 
-	/* Pointer-arithmetic bounds check; pointer +1 points to after end of
-	 * thing being pointed to. We will be using this style in the remainder
-	 * of the tutorial.
-	 */
-	if (ip6h + 1 > data_end)
-		return -1;
+    /* Pointer-arithmetic bounds check; pointer +1 points to after end of
+     * thing being pointed to. We will be using this style in the remainder
+     * of the tutorial.
+     */
+    if (ip6h + 1 > data_end)
+        return -1;
 
-	nh->pos = ip6h + 1;
-	*ip6hdr = ip6h;
+    nh->pos = ip6h + 1;
+    *ip6hdr = ip6h;
 
-	return ip6h->nexthdr;
+    return ip6h->nexthdr;
 }
 
 static __always_inline int parse_iphdr(struct hdr_cursor *nh,
                                        void *data_end,
                                        struct iphdr **iphdr)
 {
-	struct iphdr *iph = nh->pos;
-	int hdrsize;
+    struct iphdr *iph = nh->pos;
+    int hdrsize;
 
-	if (iph + 1 > data_end)
-		return -1;
+    if (iph + 1 > data_end)
+        return -1;
 
         hdrsize = iph->ihl * 4;
 
@@ -144,123 +144,123 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
         if (nh->pos + hdrsize > data_end)
                 return -1;
 
-	nh->pos += hdrsize;
-	*iphdr = iph;
+    nh->pos += hdrsize;
+    *iphdr = iph;
 
-	return iph->protocol;
+    return iph->protocol;
 }
 
 static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh,
-					  void *data_end,
-					  struct icmp6hdr **icmp6hdr)
+                      void *data_end,
+                      struct icmp6hdr **icmp6hdr)
 {
-	struct icmp6hdr *icmp6h = nh->pos;
+    struct icmp6hdr *icmp6h = nh->pos;
 
-	if (icmp6h + 1 > data_end)
-		return -1;
+    if (icmp6h + 1 > data_end)
+        return -1;
 
-	nh->pos   = icmp6h + 1;
-	*icmp6hdr = icmp6h;
+    nh->pos   = icmp6h + 1;
+    *icmp6hdr = icmp6h;
 
-	return icmp6h->icmp6_type;
+    return icmp6h->icmp6_type;
 }
 
 static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
                                          void *data_end,
                                          struct icmphdr **icmphdr)
 {
-	struct icmphdr *icmph = nh->pos;
+    struct icmphdr *icmph = nh->pos;
 
-	if (icmph + 1 > data_end)
-		return -1;
+    if (icmph + 1 > data_end)
+        return -1;
 
-	nh->pos  = icmph + 1;
-	*icmphdr = icmph;
+    nh->pos  = icmph + 1;
+    *icmphdr = icmph;
 
-	return icmph->type;
+    return icmph->type;
 }
 
 static __always_inline int parse_icmphdr_common(struct hdr_cursor *nh,
-						void *data_end,
-						struct icmphdr_common **icmphdr)
+                        void *data_end,
+                        struct icmphdr_common **icmphdr)
 {
-	struct icmphdr_common *h = nh->pos;
+    struct icmphdr_common *h = nh->pos;
 
-	if (h + 1 > data_end)
-		return -1;
+    if (h + 1 > data_end)
+        return -1;
 
-	nh->pos  = h + 1;
-	*icmphdr = h;
+    nh->pos  = h + 1;
+    *icmphdr = h;
 
-	return h->type;
+    return h->type;
 }
 
 /*
  * parse_tcphdr: parse the udp header and return the length of the udp payload
  */
 static __always_inline int parse_udphdr(struct hdr_cursor *nh,
-					void *data_end,
-					struct udphdr **udphdr)
+                    void *data_end,
+                    struct udphdr **udphdr)
 {
-	int len;
-	struct udphdr *h = nh->pos;
+    int len;
+    struct udphdr *h = nh->pos;
 
-	if (h + 1 > data_end)
-		return -1;
+    if (h + 1 > data_end)
+        return -1;
 
-	nh->pos  = h + 1;
-	*udphdr = h;
+    nh->pos  = h + 1;
+    *udphdr = h;
 
-	len = bpf_ntohs(h->len) - sizeof(struct udphdr);
-	if (len < 0)
-		return -1;
+    len = bpf_ntohs(h->len) - sizeof(struct udphdr);
+    if (len < 0)
+        return -1;
 
-	return len;
+    return len;
 }
 
 /*
  * parse_tcphdr: parse and return the length of the tcp header
  */
 static __always_inline int parse_tcphdr(struct hdr_cursor *nh,
-					void *data_end,
-					struct tcphdr **tcphdr)
+                    void *data_end,
+                    struct tcphdr **tcphdr)
 {
-	int len;
-	struct tcphdr *h = nh->pos;
+    int len;
+    struct tcphdr *h = nh->pos;
 
-	if (h + 1 > data_end)
-		return -1;
+    if (h + 1 > data_end)
+        return -1;
 
-	len = h->doff * 4;
-	if ((void *) h + len > data_end)
-		return -1;
+    len = h->doff * 4;
+    if ((void *) h + len > data_end)
+        return -1;
 
-	nh->pos  = h + 1;
-	*tcphdr = h;
+    nh->pos  = h + 1;
+    *tcphdr = h;
 
-	return len;
+    return len;
 }
 
 static __always_inline int parse_nshhdr(struct hdr_cursor *nh,
                                        void *data_end,
                                        struct nshhdr **nshhdr)
 {
-	struct nshhdr *nshh = nh->pos;
-	int hdrsize = 4 * 2; // minimum size of a nsh header i.e, MD TYPE 2
+    struct nshhdr *nshh = nh->pos;
+    int hdrsize = 4 * 2; // minimum size of a nsh header i.e, MD TYPE 2
 
-	if (nshh + hdrsize > data_end)
-		return -1;
-		
+    if (nshh + hdrsize > data_end)
+        return -1;
+        
         hdrsize = nsh_hdr_len(nshh) * 4;
 
         /* Variable-length IPv4 header, need to use byte-based arithmetic */
         if (nh->pos + hdrsize > data_end)
                 return -1;
 
-	nh->pos += hdrsize;
-	*nshhdr = nshh;
+    nh->pos += hdrsize;
+    *nshhdr = nshh;
 
-	return nshh->np;
+    return nshh->np;
 }
 
 #endif /* __PARSING_HELPERS_H */

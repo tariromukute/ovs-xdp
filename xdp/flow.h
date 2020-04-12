@@ -96,49 +96,49 @@ struct xdp_flow {
  * consider redisigning e.g, trying to add the actions to the flow_metadata instead of
  * the key*/
 struct flow_metadata {
-	__u8 type; // type of header, won't need this in current implentatiom it is always action attributes
-	__u8 len; // length of the 
-	__u8 pos; // the pos of the action attribute being processed
-	__u8 offset; // Multiple of __u8 from the position of data
-	struct xdp_flow_key key;
+    __u8 type; // type of header, won't need this in current implentatiom it is always action attributes
+    __u8 len; // length of the 
+    __u8 pos; // the pos of the action attribute being processed
+    __u8 offset; // Multiple of __u8 from the position of data
+    struct xdp_flow_key key;
 };
 
 struct ovs_len_tbl {
-	char *name;
-	const struct ovs_len_tbl *next;
+    char *name;
+    const struct ovs_len_tbl *next;
 };
 
 static const struct ovs_len_tbl
 ovs_action_attr_list[OVS_ACTION_ATTR_MAX + 1] = {
     [OVS_ACTION_ATTR_UNSPEC] = { .name = "OVS_ACTION_ATTR_UNSPEC"},
     [OVS_ACTION_ATTR_OUTPUT] =  { .name = "OVS_ACTION_ATTR_OUTPUT"},
-	[OVS_ACTION_ATTR_USERSPACE] =  { .name = "OVS_ACTION_ATTR_USERSPACE"},
-	[OVS_ACTION_ATTR_SET] = { .name = "OVS_ACTION_ATTR_SET"},
-	[OVS_ACTION_ATTR_PUSH_VLAN] = { .name = "OVS_ACTION_ATTR_PUSH_VLAN"} ,
-	[OVS_ACTION_ATTR_POP_VLAN] =  { .name = "OVS_ACTION_ATTR_POP_VLAN"},
-	[OVS_ACTION_ATTR_SAMPLE] =  { .name = "OVS_ACTION_ATTR_SAMPLE"},
-	[OVS_ACTION_ATTR_RECIRC] =  { .name = "OVS_ACTION_ATTR_RECIRC"},
-	[OVS_ACTION_ATTR_HASH] =  { .name = "OVS_ACTION_ATTR_HASH"},
-	[OVS_ACTION_ATTR_PUSH_MPLS] =  { .name = "OVS_ACTION_ATTR_PUSH_MPLS"},
-	[OVS_ACTION_ATTR_POP_MPLS] = { .name = "OVS_ACTION_ATTR_POP_MPLS"} ,
-	[OVS_ACTION_ATTR_SET_MASKED] =  { .name = "OVS_ACTION_ATTR_SET_MASKED"},
-	[OVS_ACTION_ATTR_CT] = { .name = "OVS_ACTION_ATTR_CT"},
-	[OVS_ACTION_ATTR_TRUNC] = { .name = "OVS_ACTION_ATTR_TRUNC"} ,
-	[OVS_ACTION_ATTR_PUSH_ETH] =  { .name = "OVS_ACTION_ATTR_PUSH_ETH"},
-	[OVS_ACTION_ATTR_POP_ETH] =  { .name = "OVS_ACTION_ATTR_POP_ETH"},
-	[OVS_ACTION_ATTR_CT_CLEAR] =  { .name = "OVS_ACTION_ATTR_CT_CLEAR"},
-	[OVS_ACTION_ATTR_PUSH_NSH] =  { .name = "OVS_ACTION_ATTR_PUSH_NSH"},
-	[OVS_ACTION_ATTR_POP_NSH] =  { .name = "OVS_ACTION_ATTR_POP_NSH"},
-	[OVS_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER"},
-	[OVS_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE"},
+    [OVS_ACTION_ATTR_USERSPACE] =  { .name = "OVS_ACTION_ATTR_USERSPACE"},
+    [OVS_ACTION_ATTR_SET] = { .name = "OVS_ACTION_ATTR_SET"},
+    [OVS_ACTION_ATTR_PUSH_VLAN] = { .name = "OVS_ACTION_ATTR_PUSH_VLAN"} ,
+    [OVS_ACTION_ATTR_POP_VLAN] =  { .name = "OVS_ACTION_ATTR_POP_VLAN"},
+    [OVS_ACTION_ATTR_SAMPLE] =  { .name = "OVS_ACTION_ATTR_SAMPLE"},
+    [OVS_ACTION_ATTR_RECIRC] =  { .name = "OVS_ACTION_ATTR_RECIRC"},
+    [OVS_ACTION_ATTR_HASH] =  { .name = "OVS_ACTION_ATTR_HASH"},
+    [OVS_ACTION_ATTR_PUSH_MPLS] =  { .name = "OVS_ACTION_ATTR_PUSH_MPLS"},
+    [OVS_ACTION_ATTR_POP_MPLS] = { .name = "OVS_ACTION_ATTR_POP_MPLS"} ,
+    [OVS_ACTION_ATTR_SET_MASKED] =  { .name = "OVS_ACTION_ATTR_SET_MASKED"},
+    [OVS_ACTION_ATTR_CT] = { .name = "OVS_ACTION_ATTR_CT"},
+    [OVS_ACTION_ATTR_TRUNC] = { .name = "OVS_ACTION_ATTR_TRUNC"} ,
+    [OVS_ACTION_ATTR_PUSH_ETH] =  { .name = "OVS_ACTION_ATTR_PUSH_ETH"},
+    [OVS_ACTION_ATTR_POP_ETH] =  { .name = "OVS_ACTION_ATTR_POP_ETH"},
+    [OVS_ACTION_ATTR_CT_CLEAR] =  { .name = "OVS_ACTION_ATTR_CT_CLEAR"},
+    [OVS_ACTION_ATTR_PUSH_NSH] =  { .name = "OVS_ACTION_ATTR_PUSH_NSH"},
+    [OVS_ACTION_ATTR_POP_NSH] =  { .name = "OVS_ACTION_ATTR_POP_NSH"},
+    [OVS_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER"},
+    [OVS_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE"},
 };
 
 enum sw_flow_mac_proto {
-	MAC_PROTO_NONE = 0,
-	MAC_PROTO_ETHERNET,
+    MAC_PROTO_NONE = 0,
+    MAC_PROTO_ETHERNET,
 };
 
-#define XDP_FLOW_KEY_INVALID	0x80
+#define XDP_FLOW_KEY_INVALID    0x80
 
 static inline __u8 ovs_key_mac_proto(const struct xdp_flow_key *key)
 {

@@ -28,13 +28,13 @@ int xdp_action_attr_push_eth(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
 
-	bpf_printk(" ==== OVS_ACTION_ATTR_PUSH_ETH === \n");	
+    bpf_printk(" ==== OVS_ACTION_ATTR_PUSH_ETH === \n");    
 
-	tail_action(ctx);
+    tail_action(ctx);
 
     bpf_printk(" == !! XDP:  reached fall-through action !! ==\n");
 // out:
-	return action;
+    return action;
 }
 
 SEC("OVS_ACTION_ATTR_POP_ETH")
@@ -42,13 +42,13 @@ int xdp_action_attr_pop_eth(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
 
-	bpf_printk(" ==== OVS_ACTION_ATTR_POP_ETH === \n");	
+    bpf_printk(" ==== OVS_ACTION_ATTR_POP_ETH === \n");    
 
-	tail_action(ctx);
+    tail_action(ctx);
 
     bpf_printk(" == !! XDP:  reached fall-through action !! ==\n");
 // out:
-	return action;
+    return action;
 }
 
 SEC("OVS_ACTION_ATTR_OUTPUT")
@@ -56,13 +56,13 @@ int xdp_action_attr_output(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
 
-	bpf_printk(" ==== OVS_ACTION_ATTR_OUTPUT === \n");	
+    bpf_printk(" ==== OVS_ACTION_ATTR_OUTPUT === \n");    
 
-	tail_action(ctx);
+    tail_action(ctx);
 
     bpf_printk(" == !! XDP:  reached fall-through action !! ==\n");
 // out:
-	return action;
+    return action;
 }
 
 char _license[] SEC("license") = "GPL";

@@ -230,9 +230,9 @@ int xdp_process(struct xdp_md *ctx)
         goto out;
 
     /* Need to re-evaluate data_end and data after head adjustment, and
-	 * bounds check, even though we know there is enough space (as we
-	 * increased it).
-	 */
+     * bounds check, even though we know there is enough space (as we
+     * increased it).
+     */
     data_end = (void *)(long)ctx->data_end;
     fm = (void *)(long)ctx->data;
 

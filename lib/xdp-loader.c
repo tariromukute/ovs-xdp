@@ -301,9 +301,9 @@ int xdp_load(const char *ifname)
     }
 
     /* At this point: BPF-progs are (only) loaded by the kernel, and prog_fd
-	 * is our select file-descriptor handle. Next step is attaching this FD
-	 * to a kernel hook point, in this case XDP net_device link-level hook.
-	 */
+     * is our select file-descriptor handle. Next step is attaching this FD
+     * to a kernel hook point, in this case XDP net_device link-level hook.
+     */
     err = xdp_link_attach(ifindex, xdp_flags, prog_fd);
     if (err)
     {

@@ -22,90 +22,90 @@
  */
 static __always_inline int vlan_tag_pop(struct xdp_md *ctx, struct ethhdr *eth)
 {
-	void *data_end = (void *)(long)ctx->data_end;
-	struct ethhdr eth_cpy;
-	struct vlan_hdr *vlh;
-	__be16 h_proto;
-	int vlid;
+    void *data_end = (void *)(long)ctx->data_end;
+    struct ethhdr eth_cpy;
+    struct vlan_hdr *vlh;
+    __be16 h_proto;
+    int vlid;
 
-	if (!proto_is_vlan(eth->h_proto))
-		return -1;
+    if (!proto_is_vlan(eth->h_proto))
+        return -1;
 
-	/* Careful with the parenthesis here */
-	vlh = (void *)(eth + 1);
+    /* Careful with the parenthesis here */
+    vlh = (void *)(eth + 1);
 
-	/* Still need to do bounds checking */
-	if (vlh + 1 > data_end)
-		return -1;
+    /* Still need to do bounds checking */
+    if (vlh + 1 > data_end)
+        return -1;
 
-	/* Save vlan ID for returning, h_proto for updating Ethernet header */
-	vlid = bpf_ntohs(vlh->h_vlan_TCI);
-	h_proto = vlh->h_vlan_encapsulated_proto;
+    /* Save vlan ID for returning, h_proto for updating Ethernet header */
+    vlid = bpf_ntohs(vlh->h_vlan_TCI);
+    h_proto = vlh->h_vlan_encapsulated_proto;
 
-	/* Make a copy of the outer Ethernet header before we cut it off */
-	__builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
+    /* Make a copy of the outer Ethernet header before we cut it off */
+    __builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
 
-	/* Actually adjust the head pointer */
-	if (bpf_xdp_adjust_head(ctx, (int)sizeof(*vlh)))
-		return -1;
+    /* Actually adjust the head pointer */
+    if (bpf_xdp_adjust_head(ctx, (int)sizeof(*vlh)))
+        return -1;
 
-	/* Need to re-evaluate data *and* data_end and do new bounds checking
-	 * after adjusting head
-	 */
-	eth = (void *)(long)ctx->data;
-	data_end = (void *)(long)ctx->data_end;
-	if (eth + 1 > data_end)
-		return -1;
+    /* Need to re-evaluate data *and* data_end and do new bounds checking
+     * after adjusting head
+     */
+    eth = (void *)(long)ctx->data;
+    data_end = (void *)(long)ctx->data_end;
+    if (eth + 1 > data_end)
+        return -1;
 
-	/* Copy back the old Ethernet header and update the proto type */
-	__builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
-	eth->h_proto = h_proto;
+    /* Copy back the old Ethernet header and update the proto type */
+    __builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
+    eth->h_proto = h_proto;
 
-	return vlid;
+    return vlid;
 }
 
 /* Pushes a new VLAN tag after the Ethernet header. Returns 0 on success,
  * -1 on failure.
  */
 static __always_inline int vlan_tag_push(struct xdp_md *ctx,
-		struct ethhdr *eth, int vlid)
+        struct ethhdr *eth, int vlid)
 {
-	void *data_end = (void *)(long)ctx->data_end;
-	struct ethhdr eth_cpy;
-	struct vlan_hdr *vlh;
+    void *data_end = (void *)(long)ctx->data_end;
+    struct ethhdr eth_cpy;
+    struct vlan_hdr *vlh;
 
-	/* First copy the original Ethernet header */
-	__builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
+    /* First copy the original Ethernet header */
+    __builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
 
-	/* Then add space in front of the packet */
-	if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(*vlh)))
-		return -1;
+    /* Then add space in front of the packet */
+    if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(*vlh)))
+        return -1;
 
-	/* Need to re-evaluate data_end and data after head adjustment, and
-	 * bounds check, even though we know there is enough space (as we
-	 * increased it).
-	 */
-	data_end = (void *)(long)ctx->data_end;
-	eth = (void *)(long)ctx->data;
+    /* Need to re-evaluate data_end and data after head adjustment, and
+     * bounds check, even though we know there is enough space (as we
+     * increased it).
+     */
+    data_end = (void *)(long)ctx->data_end;
+    eth = (void *)(long)ctx->data;
 
-	if (eth + 1 > data_end)
-		return -1;
+    if (eth + 1 > data_end)
+        return -1;
 
-	/* Copy back the Ethernet header in the right place, populate the VLAN
-	 * tag with the ID and proto, and set the outer Ethernet header to VLAN
-	 * type. */
-	__builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
+    /* Copy back the Ethernet header in the right place, populate the VLAN
+     * tag with the ID and proto, and set the outer Ethernet header to VLAN
+     * type. */
+    __builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
 
-	vlh = (void *)(eth +1);
+    vlh = (void *)(eth +1);
 
-	if (vlh + 1 > data_end)
-		return -1;
+    if (vlh + 1 > data_end)
+        return -1;
 
-	vlh->h_vlan_TCI = bpf_htons(vlid);
-	vlh->h_vlan_encapsulated_proto = eth->h_proto;
+    vlh->h_vlan_TCI = bpf_htons(vlid);
+    vlh->h_vlan_encapsulated_proto = eth->h_proto;
 
-	eth->h_proto = bpf_htons(ETH_P_8021Q);
-	return 0;
+    eth->h_proto = bpf_htons(ETH_P_8021Q);
+    return 0;
 }
 
 /*
@@ -113,10 +113,10 @@ static __always_inline int vlan_tag_push(struct xdp_md *ctx,
  */
 static __always_inline void swap_src_dst_mac(struct ethhdr *eth)
 {
-	__u8 h_tmp[ETH_ALEN];
-	__builtin_memcpy(h_tmp, eth->h_source, ETH_ALEN);
-	__builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-	__builtin_memcpy(eth->h_dest, h_tmp, ETH_ALEN);
+    __u8 h_tmp[ETH_ALEN];
+    __builtin_memcpy(h_tmp, eth->h_source, ETH_ALEN);
+    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
+    __builtin_memcpy(eth->h_dest, h_tmp, ETH_ALEN);
 }
 
 /*
@@ -124,9 +124,9 @@ static __always_inline void swap_src_dst_mac(struct ethhdr *eth)
  */
 static __always_inline void swap_src_dst_ipv6(struct ipv6hdr *ipv6)
 {
-	struct in6_addr tmp = ipv6->saddr;
-	ipv6->saddr = ipv6->daddr;
-	ipv6->daddr = tmp;
+    struct in6_addr tmp = ipv6->saddr;
+    ipv6->saddr = ipv6->daddr;
+    ipv6->daddr = tmp;
 }
 
 /*
@@ -134,9 +134,9 @@ static __always_inline void swap_src_dst_ipv6(struct ipv6hdr *ipv6)
  */
 static __always_inline void swap_src_dst_ipv4(struct iphdr *iphdr)
 {
-	__be32 tmp = iphdr->saddr;
-	iphdr->saddr = iphdr->daddr;
-	iphdr->daddr = tmp;
+    __be32 tmp = iphdr->saddr;
+    iphdr->saddr = iphdr->daddr;
+    iphdr->daddr = tmp;
 }
 
 static __always_inline int proto_is_nsh(__u16 h_proto)
@@ -149,92 +149,92 @@ static __always_inline int proto_is_nsh(__u16 h_proto)
  */
 static __always_inline int nsh_pop(struct xdp_md *ctx, struct ethhdr *eth)
 {
-	void *data_end = (void *)(long)ctx->data_end;
-	struct ethhdr eth_cpy;
-	struct nshhdr *nsh;
+    void *data_end = (void *)(long)ctx->data_end;
+    struct ethhdr eth_cpy;
+    struct nshhdr *nsh;
 
-	if (!proto_is_nsh(eth->h_proto))
-		return -1;
+    if (!proto_is_nsh(eth->h_proto))
+        return -1;
 
-	/* Careful with the parenthesis here */
-	nsh = (void *)(eth + 1);
+    /* Careful with the parenthesis here */
+    nsh = (void *)(eth + 1);
 
-	/* Still need to do bounds checking */
-	if (nsh + 1 > data_end)
-		return -1;
+    /* Still need to do bounds checking */
+    if (nsh + 1 > data_end)
+        return -1;
 
-	/* Save vlan ID for returning, h_proto for updating Ethernet header */
-	// int spi = bpf_ntohs(nsh->spi);
+    /* Save vlan ID for returning, h_proto for updating Ethernet header */
+    // int spi = bpf_ntohs(nsh->spi);
 
-	/* Make a copy of the outer Ethernet header before we cut it off */
-	__builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
+    /* Make a copy of the outer Ethernet header before we cut it off */
+    __builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
 
-	/* Actually adjust the head pointer */
-	if (bpf_xdp_adjust_head(ctx, (int)sizeof(*nsh)))
-		return -1;
+    /* Actually adjust the head pointer */
+    if (bpf_xdp_adjust_head(ctx, (int)sizeof(*nsh)))
+        return -1;
 
-	/* Need to re-evaluate data *and* data_end and do new bounds checking
-	 * after adjusting head
-	 */
-	eth = (void *)(long)ctx->data;
-	data_end = (void *)(long)ctx->data_end;
-	if (eth + 1 > data_end)
-		return -1;
+    /* Need to re-evaluate data *and* data_end and do new bounds checking
+     * after adjusting head
+     */
+    eth = (void *)(long)ctx->data;
+    data_end = (void *)(long)ctx->data_end;
+    if (eth + 1 > data_end)
+        return -1;
 
-	/* Copy back the old Ethernet header and update the proto type */
-	__builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
-	eth->h_proto = bpf_htons(0x0800);
+    /* Copy back the old Ethernet header and update the proto type */
+    __builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
+    eth->h_proto = bpf_htons(0x0800);
 
-	return 0;
+    return 0;
 }
 
 /* Pushes a new VLAN tag after the Ethernet header. Returns 0 on success,
  * -1 on failure.
  */
 static __always_inline int nsh_push(struct xdp_md *ctx,
-		struct ethhdr *eth, __u32 spi, __u32 si)
+        struct ethhdr *eth, __u32 spi, __u32 si)
 {
-	void *data_end = (void *)(long)ctx->data_end;
-	struct ethhdr eth_cpy;
-	struct nshhdr *nsh;
+    void *data_end = (void *)(long)ctx->data_end;
+    struct ethhdr eth_cpy;
+    struct nshhdr *nsh;
 
-	/* First copy the original Ethernet header */
-	__builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
+    /* First copy the original Ethernet header */
+    __builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
 
-	/* Then add space in front of the packet */
-	if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(*nsh)))
-		return -1;
+    /* Then add space in front of the packet */
+    if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(*nsh)))
+        return -1;
 
-	/* Need to re-evaluate data_end and data after head adjustment, and
-	 * bounds check, even though we know there is enough space (as we
-	 * increased it).
-	 */
-	data_end = (void *)(long)ctx->data_end;
-	eth = (void *)(long)ctx->data;
+    /* Need to re-evaluate data_end and data after head adjustment, and
+     * bounds check, even though we know there is enough space (as we
+     * increased it).
+     */
+    data_end = (void *)(long)ctx->data_end;
+    eth = (void *)(long)ctx->data;
 
-	if (eth + 1 > data_end)
-		return -1;
+    if (eth + 1 > data_end)
+        return -1;
 
-	/* Copy back the Ethernet header in the right place, populate the NSH
-	 * tag with the NSH and proto, and set the outer Ethernet header to NSH
-	 * type. */
-	__builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
+    /* Copy back the Ethernet header in the right place, populate the NSH
+     * tag with the NSH and proto, and set the outer Ethernet header to NSH
+     * type. */
+    __builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
 
-	nsh = (void *)(eth +1);
+    nsh = (void *)(eth +1);
 
-	if (nsh + 1 > data_end)
-		return -1;
+    if (nsh + 1 > data_end)
+        return -1;
 
     nsh->mdtype = NSH_M_TYPE1;
     nsh_set_flags_ttl_len(nsh, 0x0, 0x3F, 0x6);
     nsh->np = 0x1;
-	int path_hdr = ((spi << NSH_SPI_SHIFT) & NSH_SPI_MASK) | (si & NSH_SI_MASK);
-	nsh->path_hdr = bpf_htonl(path_hdr);
+    int path_hdr = ((spi << NSH_SPI_SHIFT) & NSH_SPI_MASK) | (si & NSH_SI_MASK);
+    nsh->path_hdr = bpf_htonl(path_hdr);
     // nsh->md1.context = __cpu_to_be32(0x11223344);
 
     eth->h_proto = bpf_htons(ETH_P_NSH);
 
-	return 0;
+    return 0;
 }
 
 #endif /* __REWRITE_HELPERS_H */
