@@ -103,6 +103,15 @@ struct flow_metadata {
     struct xdp_flow_key key;
 };
 
+struct xdp_upcall {
+    __u8 type;
+    __u8 subtype;
+    __u32 ifindex;
+    __u32 pkt_len;
+    struct xdp_flow_key key;  
+    /* Follwed by pkt_len of packet data */
+};
+
 struct ovs_len_tbl {
     char *name;
     const struct ovs_len_tbl *next;
