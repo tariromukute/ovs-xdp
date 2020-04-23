@@ -117,8 +117,11 @@ struct ovs_len_tbl {
     const struct ovs_len_tbl *next;
 };
 
+#define OVS_ACTION_ATTR_UPCALL __OVS_ACTION_ATTR_MAX
+#define TAIL_TABLE_SIZE OVS_ACTION_ATTR_UPCALL + 1
+
 static const struct ovs_len_tbl
-ovs_action_attr_list[OVS_ACTION_ATTR_MAX + 1] = {
+ovs_action_attr_list[TAIL_TABLE_SIZE] = {
     [OVS_ACTION_ATTR_UNSPEC] = { .name = "OVS_ACTION_ATTR_UNSPEC"},
     [OVS_ACTION_ATTR_OUTPUT] =  { .name = "OVS_ACTION_ATTR_OUTPUT"},
     [OVS_ACTION_ATTR_USERSPACE] =  { .name = "OVS_ACTION_ATTR_USERSPACE"},
@@ -140,6 +143,7 @@ ovs_action_attr_list[OVS_ACTION_ATTR_MAX + 1] = {
     [OVS_ACTION_ATTR_POP_NSH] =  { .name = "OVS_ACTION_ATTR_POP_NSH"},
     [OVS_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER"},
     [OVS_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE"},
+    [OVS_ACTION_ATTR_UPCALL] = { .name = "OVS_ACTION_ATTR_UPCALL" }
 };
 
 enum sw_flow_mac_proto {

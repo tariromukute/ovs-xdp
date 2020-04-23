@@ -64,8 +64,10 @@
 #include "unixctl.h"
 #include "util.h"
 #include "uuid.h"
+#include "hash.h"
+#include "uuid.h"
 
-#include "xdp-loader.h"
+#include "xdp/loader.h"
 
 /* ================================================================
     The xdp uses more or less the same datapath as netdev, only
@@ -101,6 +103,7 @@ struct dp_handler {
 };
 
 struct dp_xdp {
+    struct dpif *dpif;
     const struct dpif_class *const class;
     const char *const name;
     struct ovs_refcount ref_cnt;
@@ -137,6 +140,7 @@ struct dp_xdp {
 struct dp_xdp_port {
     odp_port_t port_no;
     int ifindex;
+    const char *name;
     bool dynamic_txqs;          /* If true XPS will be used. */
     bool need_reconfigure;      /* True if we should reconfigure netdev. */
     struct netdev *netdev;
@@ -153,8 +157,9 @@ struct dp_xdp_port {
     /* TODO: check if we need a lock for upcalls */
     /* The list of upcall ids for the port. These correspond to the xsk sockets
      * used for upcalls. */
-    const uint32_t *upcall_pids; /* The upcall id, using the id of the afxdp */
+    uint32_t *upcall_pids; /* The upcall id, using the id of the afxdp */
 
+    uint32_t n_upcall_pids;
     /* TODO: consider putting a flag to check port is entry point
        the adapt it in the necessary methods like:
        - create_put 
@@ -265,28 +270,18 @@ struct dpif_xdp_flow_dump_thread {
     struct odputil_keybuf actbuf[FLOW_DUMP_MAX_BATCH];
 };
 
+struct xdp_upcall {
+    __u8 type;
+    __u8 subtype;
+    __u32 ifindex;
+    __u32 pkt_len;
+    struct xdp_flow_key key;  
+    /* Follwed by pkt_len of packet data */
+};
+
 struct ovs_xsk_event {
     struct xdp_upcall header;
-    uint8_t data[];
-};
-
-struct xsk_umem_info {
-	struct xsk_ring_prod fq;
-	struct xsk_ring_cons cq;
-	struct xsk_umem *umem;
-	void *buffer;
-};
-
-struct xsk_socket_info {
-	struct xsk_ring_cons rx;
-	struct xsk_ring_prod tx;
-	struct xsk_umem_info *umem;
-	struct xsk_socket *xsk;
-	unsigned long rx_npkts;
-	unsigned long tx_npkts;
-	unsigned long prev_rx_npkts;
-	unsigned long prev_tx_npkts;
-	u32 outstanding_tx;
+    uint8_t *data;
 };
 
 static struct odp_support dp_xdp_support = {
@@ -310,6 +305,9 @@ static bool is_dp_xdp(struct dp_xdp *dp);
 static int get_port_by_name(struct dp_xdp *dp,
                  const char *devname, struct dp_xdp_port **portp)
     OVS_REQUIRES(dp->port_mutex);
+static int get_port_by_ifindex(struct dp_xdp *dp,
+                 const int ifindex, struct dp_xdp_port **portp)
+    OVS_REQUIRES(dp->port_mutex);
 static void answer_port_query(const struct dp_xdp_port *port,
                   struct dpif_port *dpif_port);
 static uint32_t hash_port_no(odp_port_t port_no);                  
@@ -319,7 +317,7 @@ static bool is_valid_port_number(odp_port_t port_no);
 static int get_port_by_number(struct dp_xdp *dp,
                    odp_port_t port_no, struct dp_xdp_port **portp)
     OVS_REQUIRES(dp->port_mutex);
-static int dpif_xdp_port_dump_next__(const struct dp_xdp *dp, dpif_xdp_port_state *state,
+static int dpif_xdp_port_dump_next__(const struct dp_xdp *dp, struct dpif_xdp_port_state *state,
                           struct dp_xdp_port *port);
 bool dpif_is_xdp(const struct dpif *dpif);
 static struct dpif_xdp * dpif_xdp_cast(const struct dpif *dpif);
@@ -337,10 +335,10 @@ static int do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
             odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex);
 static bool port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
-               uint32_t **upcall_pids);
-static int create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp)
-    OVS_REQ_WRLOCK(dpif->upcall_lock);
-static void afxdp_channel_close(struct afxdp_channel *channel) __attribute__ ((unused));
+               uint32_t *upcall_pids);
+static int dpif_xdp_port_dump_start__(struct dp_xdp *dp, struct dpif_xdp_port_state *state);
+static int create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp, const char *name)
+    OVS_REQ_WRLOCK(dp->upcall_lock);
 static void destroy_all_channels(struct dp_xdp *dp)
     OVS_REQ_WRLOCK(dp->upcall_lock);
 static int dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
@@ -402,8 +400,6 @@ static int dpif_xdp_flow_del(struct dpif *dpif, const struct dpif_flow_del *del)
 static int dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
     OVS_NO_THREAD_SAFETY_ANALYSIS;
 static int dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get);
-static int afxdp_channel_read(struct afxdp_channel *channel, struct ofpbuf *buffer);
-static int recv_from_channel(struct dp_handler *handler, struct dpif_upcall *upcall, struct ofpbuf *buf);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -419,6 +415,28 @@ get_port_by_name(struct dp_xdp *dp,
     HMAP_FOR_EACH (port, node, &dp->ports) {
         VLOG_INFO("--- netdev name: %s, devname: %s", netdev_get_name(port->netdev), devname);
         if (!strcmp(netdev_get_name(port->netdev), devname)) {
+            *portp = port;
+            return 0;
+        }
+    }
+
+    *portp = NULL;
+    /* Callers of dpif_netdev_port_query_by_name() expect ENODEV for a non
+     * existing port. */
+    return ENODEV;
+}
+
+static int
+get_port_by_ifindex(struct dp_xdp *dp,
+                 const int ifindex, struct dp_xdp_port **portp)
+    OVS_REQUIRES(dp->port_mutex)
+{
+    VLOG_INFO("---- Called: %s  with ifindex of: %d----", __func__, ifindex);
+    struct dp_xdp_port *port; // IMPORTANT: port type not common
+
+    HMAP_FOR_EACH (port, node, &dp->ports) {
+        VLOG_INFO("--- netdev name: %s, ifindex: %d", netdev_get_name(port->netdev), netdev_get_ifindex(port->netdev));
+        if (netdev_get_ifindex(port->netdev) == ifindex) {
             *portp = port;
             return 0;
         }
@@ -627,11 +645,13 @@ port_create(const char *devname, const char *type,
     port = xzalloc(sizeof *port);
     port->port_no = port_no;
     port->ifindex = ifindex;
+    port->name = devname;
     port->netdev = netdev;
     port->type = xstrdup(type);
     port->sf = NULL;
     port->emc_enabled = true;
     port->need_reconfigure = true;
+    port->n_upcall_pids = 1;
     ovs_mutex_init(&port->txq_used_mutex);
 
     *portp = port;
@@ -653,6 +673,7 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
     VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp_port *port;
     struct dp_xdp_entry_point *ep;
+    struct xsk_socket_info *sock = NULL;
     // uint32_t upcall_pids = 0;
     int error = 0;
 
@@ -677,7 +698,18 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
     if (error) {
         goto out;
     }
-    error = port_add_channel(dp, port_no);
+
+    // add socket for upcall
+    fat_rwlock_wrlock(&dp->upcall_lock);
+    error = create_xsk_sock(dp, sock, devname);
+    fat_rwlock_unlock(&dp->upcall_lock);
+    if (error) {
+        VLOG_INFO("failed to create upcall socket");
+        goto out;
+    }
+    port->upcall_pids[0] = xsk_socket__fd(sock->xsk);
+
+    error = port_add_channel(dp, port_no, sock);
 
 out:
     if (error) {
@@ -685,13 +717,6 @@ out:
     }
 
     return error;
-}
-
-static void
-afxdp_channel_close(struct afxdp_channel *channel)
-{
-    VLOG_INFO("---- Called: %s ----", __func__);
-    /* TODO: close channel */
 }
 
 static void
@@ -738,16 +763,16 @@ port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
         return false;
     }
 
-    *upcall_pid = nl_sock_pid(dp->channels[port_idx].sock);
+    *upcall_pid = xsk_socket__fd(dp->channels[port_idx].sock->xsk);
 
     return true;
 }
 
 static int
-create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp)
-    OVS_REQ_WRLOCK(dpif->upcall_lock)
+create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp, const char *name)
+    OVS_REQ_WRLOCK(dp->upcall_lock)
 {
-    return xsk_sock_create(sockp); // TODO: implement this method in xdp/
+    return xsk_sock_create(&sockp, name);
 }
 
 static int
@@ -756,10 +781,9 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
 {
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
-    int error;
 
-    if (dpif->handlers == NULL) {
-        xsk_sock_close(sock); // TODO: implement this in xdp/
+    if (dp->handlers == NULL) {
+        xsk_sock_close(sock);
         return 0;
     }
 
@@ -769,9 +793,9 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
     if (port_idx >= dp->uc_array_size) {
         uint32_t new_size = port_idx + 1;
 
-        if (new_size > MAX_PORTS) {
-            VLOG_WARN_RL(&error_rl, "%s: datapath port %"PRIu32" too big",
-                         dpif_name(&dp->dpif), port_no);
+        if (new_size > MAX_SOCKS) {
+            VLOG_WARN("%s: datapath port %d too big",
+                         dpif_name(dp->dpif), port_no);
             return EFBIG;
         }
 
@@ -782,18 +806,13 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
             dp->channels[i].sock = NULL;
         }
 
-        dpif->uc_array_size = new_size;
+        dp->uc_array_size = new_size;
     }
 
     dp->channels[port_idx].sock = sock;
     dp->channels[port_idx].last_poll = LLONG_MIN;
 
     return 0;
-
-error:
-    dp->channels[port_idx].sock = NULL;
-
-    return error;
 }
 
 static void
@@ -813,7 +832,7 @@ port_del_channels(struct dp_xdp *dp, odp_port_t port_no)
         memset(handler->fds, 0 , sizeof(handler->fds));
         handler->event_offset = 0;
     }
-    xsk_sock_destroy(dpif->channels[port_idx].sock); // TODO: implement this in xdp/
+    xsk_sock_destroy(dp->channels[port_idx].sock); // TODO: implement this in xdp/
 }
 
 static int
@@ -866,8 +885,8 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
 
         if (port_no >= dp->uc_array_size
             || !port_get_pid(dp, port_no, &upcall_pid)) {
-            struct xsk_socket_info *sock;
-            error = create_xsk_sock(dp, sock);
+            struct xsk_socket_info *sock = NULL;
+            error = create_xsk_sock(dp, sock, port.name);
 
             if (error) {
                 goto error;
@@ -876,12 +895,12 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
             error = port_add_channel(dp, port.port_no, sock);
             if (error) {
                 VLOG_INFO("%s: could not add channels for port %s",
-                          dpif_name(&dp->dpif), port.name);
+                          dpif_name(dp->dpif), port.name);
                 xsk_sock_destroy(sock); // TODO: implement method in xdp/
                 retval = error;
                 goto error;
             }
-            upcall_pid = xsk_socket__fd(sock);
+            upcall_pid = xsk_socket__fd(sock->xsk);
         }
 
         /* Configure the vport to deliver misses to 'sock'. */
@@ -892,9 +911,8 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
             // TODO: update the port status
 
             if (error) {
-                VLOG_WARN_RL(&error_rl,
-                             "%s: failed to set upcall pid on port: %s",
-                             dpif_name(&dp->dpif), ovs_strerror(error));
+                VLOG_WARN("%s: failed to set upcall pid on port: %s",
+                             dpif_name(dp->dpif), ovs_strerror(error));
 
                 if (error != ENODEV && error != ENOENT) {
                     retval = error;
@@ -910,7 +928,7 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
         continue;
 
     error:
-        port_del_channels(dp, vport.port_no);
+        port_del_channels(dp, port.port_no);
     }
 
     return retval;
@@ -1199,24 +1217,24 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     int error = 0;
-//     ep->dp = dp;
-//     ovs_refcount_init(&ep->ref_cnt);
-//     ep->port_no = port_no;
+    ep->dp = dp;
+    ovs_refcount_init(&ep->ref_cnt);
+    ep->port_no = port_no;
 
-//     /* load the xdp program */
-//     error = xdp_load(devname);
-//     if (error) {
-//         goto out;
-//     }
-//     cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
-//                 hash_int(odp_to_u32(port_no), 0));
+    /* load the xdp program */
+    error = xdp_load(devname);
+    if (error) {
+        goto out;
+    }
+    cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
+                hash_int(odp_to_u32(port_no), 0));
 
-//     /* TODO: implement method */
+    /* TODO: implement method */
     
-// out:
-//     if (error) {
-//         dp_xdp_destroy_ep(ep);
-//     }
+out:
+    if (error) {
+        dp_xdp_destroy_ep(ep);
+    }
     return error;
 }
 
@@ -1680,34 +1698,6 @@ out:
     return error;
 }
 
-static int
-afxdp_channel_read(struct afxdp_channel *channel, struct ofpbuf *buffer)
-{
-    VLOG_INFO("---- Called: %s ----", __func__);
-    int error = 0;
-    
-    /* TODO: implement method */
-
-    return error;
-}
-
-static int
-recv_from_channel(struct dp_handler *handler, struct dpif_upcall *upcall, struct ofpbuf *buf) 
-{
-    struct afxdp_channel *channel;
-    int error = 0;
-
-    channel = xzalloc(sizeof *channel);
-    /* TODO: implement method */
-
-    /* TODO: read information from the afxdp channel */
-    error = afxdp_channel_read(channel, buf);
-
-    /* TODO: check the type of upcall and set the data */
-
-    return error;
-}
-
 /* Provider functions */
 static int
 dpif_xdp_init()
@@ -1788,6 +1778,9 @@ dpif_xdp_open(const struct dpif_class *dpif_class,
     VLOG_INFO("---- added: %s in func %s ----", dpp->name, __func__);
     if (!error) {
         *dpifp = create_dpif_xdp(dp);
+        if (create) {
+            dp->dpif = *dpifp;
+        }
     }
     dppp = shash_find_data(&dp_xdps, name);
     VLOG_INFO("---- added: %s in func %s ----", dppp->name, __func__);
@@ -1971,7 +1964,7 @@ dpif_xdp_port_get_pid(const struct dpif *dpif, odp_port_t port_no)
 
     HMAP_FOR_EACH (port, node, &dp->ports) {
         if(port->port_no == port_no) {
-            ret = port->upcall_pid;
+            ret = *port->upcall_pids;
             break;
         }
     }
@@ -2007,12 +2000,12 @@ dpif_xdp_port_dump_start(const struct dpif *dpif, void **statep)
 /* Seperating because we need an internal function that iterates
  * through and returns dp_xdp_port instead of dpif_port */
 static int
-dpif_xdp_port_dump_next__(const struct dp_xdp *dp, dpif_xdp_port_state *state,
+dpif_xdp_port_dump_next__(const struct dp_xdp *dp, struct dpif_xdp_port_state *state,
                           struct dp_xdp_port *port)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     struct hmap_node *node;
-    int retval;
+    int retval = 0;
 
     node = hmap_at_position(&dp->ports, &state->position);
     if (node) {
@@ -2027,6 +2020,7 @@ dpif_xdp_port_dump_next__(const struct dp_xdp *dp, dpif_xdp_port_state *state,
         VLOG_INFO("---- returning error in %s ----", __func__);
         retval = EOF;
     }
+    return retval;
 }
 static int
 dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
@@ -2034,18 +2028,19 @@ dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_port_state *state = state_;
-    struct dp_xdp *dp = get_dp_xdp(dpif)
-    int retval;
+    struct dp_xdp *dp = get_dp_xdp(dpif);
+    struct hmap_node *node;
+    int retval = 0;
 
     VLOG_INFO("---- dp name: %s in func %s ----", dp->name, __func__);
     
     ovs_mutex_lock(&dp->port_mutex);
-    struct dp_xdp_port *port;
+    struct dp_xdp_port port;
     node = hmap_at_position(&dp->ports, &state->position);
-    if (!dpif_xdp_port_dump_next__(dp, state, port)) {
+    if (!dpif_xdp_port_dump_next__(dp, state, &port)) {
         dpif_port->name = state->name;
-        dpif_port->type = port->type;
-        dpif_port->port_no = port->port_no;
+        dpif_port->type = port.type;
+        dpif_port->port_no = port.port_no;
     } else {
         retval = EOF;
     }
@@ -2340,12 +2335,14 @@ extract_key(struct dp_xdp *dp, const struct xdp_flow_key *key,
     // bpf_flow_key_extract_metadata(key, &flow); // probably don't need this
 
 
-    if (flow.in_port.odp_port != 0) {
-        flow.in_port.odp_port = ifindex_to_odp(dp,
-                                    odp_to_u32(flow.in_port.odp_port));
-    } else {
+    // if (flow.in_port.odp_port != 0) {
+    //     flow.in_port.odp_port = ifindex_to_odp(dp,
+    //                                 odp_to_u32(flow.in_port.odp_port));
+    // } else {
+    if (flow.in_port.odp_port == 0) {
         flow.in_port.odp_port = packet->md.in_port.odp_port;
     }
+    // }
     VLOG_INFO("flow.in_port.odp_port %d", flow.in_port.odp_port);
 
     // block for debug printing
@@ -2364,6 +2361,20 @@ extract_key(struct dp_xdp *dp, const struct xdp_flow_key *key,
     return 0;
 }
 
+static void
+dp_xdp_flow_hash(const void *key, size_t key_len, ovs_u128 *hash)
+{
+    static struct ovsthread_once once = OVSTHREAD_ONCE_INITIALIZER;
+    static uint32_t secret;
+
+    if (ovsthread_once_start(&once)) {
+        secret = random_uint32();
+        ovsthread_once_done(&once);
+    }
+    hash_bytes128(key, key_len, secret, hash);
+    uuid_set_bits_v4((struct uuid *)hash);
+}
+
 /* perf_channel_read() fills the first part of 'buffer' with the full event.
  * Here, the key will be extracted immediately following it, and 'upcall'
  * will be initialized to point within 'buffer'.
@@ -2375,16 +2386,26 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
     VLOG_INFO("---- Called: %s ----", __func__);
     size_t pkt_len = e->header.pkt_len;
     size_t pre_key_len;
-    odp_port_t port_no;
+    struct dp_xdp_port *port;
     int err;
 
     // check if the packet is valid (by size)
 
     // get port_no from index
-    port_no = ifindex_to_odp(dp, e->header.ifindex);
-    VLOG_INFO("ifindex %d odp %d", e->header.ifindex, port_no);
-    if (port_no == ODPP_NONE) {
-        VLOG_WARN_RL(&rl, "failed to map upcall ifindex=%d to odp",
+    /* TODO: have the db for the ports and datapath stored in a bpf map so that there
+     * won't be a need for the conversion. The upcall will come with port_no, also any
+     * search can be done by querying the map */
+    ovs_mutex_lock(&dp->port_mutex);
+    err = get_port_by_ifindex(dp, e->header.ifindex, &port);
+    ovs_mutex_unlock(&dp->port_mutex);
+    
+    if (err) {
+        return err;
+    }
+
+    VLOG_INFO("ifindex %d odp %d", e->header.ifindex, port->port_no);
+    if (port->port_no == ODPP_NONE) {
+        VLOG_WARN("failed to map upcall ifindex=%d to odp",
                      e->header.ifindex);
         return EINVAL;
     }
@@ -2402,7 +2423,7 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
     
     dp_packet_use_stub(&upcall->packet, e->data, pkt_len);
     dp_packet_set_size(&upcall->packet, pkt_len);
-    pkt_metadata_init(&upcall->packet.md, port_no);
+    pkt_metadata_init(&upcall->packet.md, port->port_no);
 
     err = extract_key(dp, &e->header.key, &upcall->packet, buffer); // key will start being append from msg
     if (err) {
@@ -2411,7 +2432,7 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
 
     upcall->key = buffer->msg;
     upcall->key_len = buffer->size - pre_key_len;
-    dpif_flow_hash(dp->dpif, upcall->key, upcall->key_len, &upcall->ufid);
+    dp_xdp_flow_hash(upcall->key, upcall->key_len, &upcall->ufid);
 
     return 0;
 }
@@ -2445,9 +2466,9 @@ xsk_socket_data_to_upcall_userspace(struct dp_xdp *dp, struct ovs_xsk_event *e,
                                 struct ofpbuf *buffer)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    const struct nlattr *actions = (struct nlattr *)e->header.uactions;
-    const struct nlattr *a;
-    unsigned int left;
+    // const struct nlattr *actions = (struct nlattr *)e->header.uactions;
+    // const struct nlattr *a;
+    // unsigned int left;
     int err;
 
     err = xsk_socket_data_to_upcall__(dp, e, upcall, buffer);
@@ -2474,9 +2495,9 @@ xsk_socket_data_to_upcall_userspace(struct dp_xdp *dp, struct ovs_xsk_event *e,
     return 0;
 }
 
-static u64 ether_addr_to_u64(const u8 *addr)
+static __u64 ether_addr_to_u64(const __u8 *addr)
 {
-    u64 u = 0;
+    __u64 u = 0;
     int i;
 
     for (i = 6; i >= 0; i--)
@@ -2485,20 +2506,21 @@ static u64 ether_addr_to_u64(const u8 *addr)
 }
 
 static void 
-hex_dump(struct ovs_xsk_event *e, size_t length, u64 addr)
+hex_dump(struct ovs_xsk_event *e, size_t length, __u64 addr)
 {
     VLOG_INFO("packet len: %d", e->header.pkt_len);
     VLOG_INFO("source addr: %llx", ether_addr_to_u64(&e->data[0]));
 }
 
 static int 
-xsk_socket_read(struct xsk_socket_info *sock, struct pollfd *fds, ofpbuf *buf)
+xsk_socket_read(struct xsk_socket_info *xsk, int num_socks, struct pollfd *fds, struct ofpbuf *buf)
 {
     unsigned int rcvd, i;
-	u32 idx_rx = 0, idx_fq = 0;
+	__u32 idx_rx = 0, idx_fq = 0;
 	int ret;
+    int opt_timeout = -1;
 
-	rcvd = xsk_ring_cons__peek(&xsk->rx, BATCH_SIZE, &idx_rx);
+	rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
 	if (!rcvd) {
 		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
 			ret = poll(fds, num_socks, opt_timeout);
@@ -2513,16 +2535,16 @@ xsk_socket_read(struct xsk_socket_info *sock, struct pollfd *fds, ofpbuf *buf)
 	ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
 	while (ret != rcvd) {
 		if (ret < 0)
-			exit_with_error(-ret);
+			return ret; // TODO: check if it's the appropriate way to respond to error
 		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
 			ret = poll(fds, num_socks, opt_timeout);
 		ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
 	}
 
 	for (i = 0; i < rcvd; i++) {
-		u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
-		u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
-		u64 orig = xsk_umem__extract_addr(addr);
+		__u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
+		__u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
+		__u64 orig = xsk_umem__extract_addr(addr);
 
 		addr = xsk_umem__add_offset_to_addr(addr);
 		struct ovs_xsk_event *e = xsk_umem__get_data(xsk->umem->buffer, addr);
@@ -2538,7 +2560,7 @@ xsk_socket_read(struct xsk_socket_info *sock, struct pollfd *fds, ofpbuf *buf)
 
 	xsk_ring_prod__submit(&xsk->umem->fq, rcvd);
 	xsk_ring_cons__release(&xsk->rx, rcvd);
-	xsk->rx_npkts += rcvd;
+	xsk->stats.rx_packets += rcvd;
     return 0;
 }
 
@@ -2600,7 +2622,7 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
 
         handler->event_offset++;
 
-        error = xsk_socket_read(ch->sock, buf);
+        error = xsk_socket_read(ch->sock, dp->n_channels, handler->fds, buf);
         if (error) {
             /* ENOBUFS typically means that we've received so many
                 * packets that the buffer overflowed.  Try again

@@ -185,28 +185,59 @@ int xdp_process(struct xdp_md *ctx)
 
     key.valid = 1;
 
-    flow = bpf_map_lookup_elem(&_flow_table, &key);
+    flow = bpf_map_lookup_elem(&flow_table, &key);
     if (!flow)
     {
         bpf_printk("Upcall needed\n");
-        action = XDP_PASS; // Upcall
-        /* TODO: remove, for dev testing only */
-        struct xdp_flow_key k;
-        // initialise to avoid unbound error during load
-        memset(&k, 0, sizeof(struct xdp_flow_key));
-        bpf_printk("trying the dummy key and actions\n");
-        flow = bpf_map_lookup_elem(&_flow_table, &k);
-        if(!flow) {
-            bpf_printk("User program did not initialise map\n");
+        free(flow);
+        int index = ctx->rx_queue_index;
+
+        struct xdp_upcall upcall;
+        memset(&upcall, 0, sizeof(struct xdp_upcall));
+        upcall.type = 0;
+        upcall.subtype = 0;
+        upcall.ifindex = ctx->ingress_ifindex;
+        upcall.pkt_len = data_end - data;
+        memcpy(&upcall.key, &key, sizeof(struct xdp_flow_key));
+
+        /* NOTE: if you don't put bpf_redirect_map in the program that you load to on the interface
+         * and rather put it in a tail program e.g., bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL)
+         * and you create a xsk_socket for the interface. The xsk_socket seems to be created without an error
+         * but on trying to do xsk_socket__fd(xsk_socket->xsk) you get a segmentation fault. This is resolved
+         * by putting bpf_redirect_map(&xsks_map, index, 0) directly into the program loaded. However, calling
+         * bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL) i.e, invoking a tail program that will send
+         * to a xsk_socket, before bpf_redirect_map(&xsks_map, index, 0) will still result in the packets being
+         * delivered, i.e, being sent by the tail program and not the bpf_redirect_map TODO: check the libbpf or 
+         * helper function why this is, it maybe due to some 'enforced' logic that can be changed */
+        if (bpf_map_lookup_elem(&xsks_map, &index))
+            return bpf_redirect_map(&xsks_map, index, 0);
+
+        if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(struct xdp_upcall)))
+            goto out;
+
+        /* Need to re-evaluate data_end and data after head adjustment, and
+        * bounds check, even though we know there is enough space (as we
+        * increased it).
+        */
+        data_end = (void *)(long)ctx->data_end;
+        struct xdp_upcall *up = (void *)(long)ctx->data;
+
+        
+        if (up + 1 > data_end)
+        {
+            action = XDP_DROP; // error should not occur, but if for some weird reason it does drop packet
             goto out;
         }
+
+        memcpy(up, &upcall, sizeof(*up));
+
+        goto out;
     }
 
     struct act_cursor cur;
     memcpy(&cur, &flow->actions.data[0], sizeof(struct act_cursor));
-    bpf_printk("type is: %x\n", cur.type);
     int k = 0;
-    if (bpf_map_update_elem(&_percpu_actions, &k, &flow->actions, 0))
+    if (bpf_map_update_elem(&percpu_actions, &k, &flow->actions, 0))
     {
         bpf_printk("Could not update percpu_actions map\n");
         goto out;

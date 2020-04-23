@@ -74,33 +74,35 @@ $(info "================ RUNNING =======================")
 #
 
 XDP_TARGETS = \
-	xdp/actions \
-	xdp/entry-point
+	lib/xdp/actions \
+	lib/xdp/entry-point
 
 USER_TARGETS = \
-	xdp/datapath \
-	xdp/flow \
-	xdp/flow-table
+	lib/xdp/datapath \
+	lib/xdp/flow \
+	lib/xdp/flow-table \
+	lib/xdp/loader
 
 xdp_headers = \
-	xdp/datapath.h \
-	xdp/flow.h \
-	xdp/flow-table.h \
-	xdp/tail_actions.h
+	lib/xdp/datapath.h \
+	lib/xdp/flow.h \
+	lib/xdp/flow-table.h \
+	lib/xdp/tail_actions.h \
+	lib/xdp/loader.h
 
 helpers_headers = \
-	xdp/headers/bpf_endian.h \
-	xdp/headers/bpf_helpers.h \
-	xdp/headers/bpf_util.h \
-	xdp/headers/common_helpers.h \
-	xdp/headers/jhash.h \
-	xdp/headers/nsh.h \
-	xdp/headers/parsing_helpers.h \
-	xdp/headers/perf-sys.h \
-	xdp/headers/rewrite_helpers.h \
-	xdp/headers/linux/bpf.h \
-	xdp/headers/linux/err.h \
-	xdp/headers/linux/if_link.h
+	lib/xdp/headers/bpf_endian.h \
+	lib/xdp/headers/bpf_helpers.h \
+	lib/xdp/headers/bpf_util.h \
+	lib/xdp/headers/common_helpers.h \
+	lib/xdp/headers/jhash.h \
+	lib/xdp/headers/nsh.h \
+	lib/xdp/headers/parsing_helpers.h \
+	lib/xdp/headers/perf-sys.h \
+	lib/xdp/headers/rewrite_helpers.h \
+	lib/xdp/headers/linux/bpf.h \
+	lib/xdp/headers/linux/err.h \
+	lib/xdp/headers/linux/if_link.h
 
 LLC ?= llc
 CLANG ?= clang
@@ -122,10 +124,10 @@ XCFLAGS =
 # XCFLAGS ?= -I$(LIBBPF_DIR)/root/usr/include/ -g
 # Extra include for Ubuntu issue #44
 # XCFLAGS += -I/usr/include/x86_64-linux-gnu
-XCFLAGS += -Ixdp/headers/
+XCFLAGS += -Ilib/xdp/headers/
 LDFLAGS ?= -L$(LIBBPF_DIR)
 
-XLIBS = -l:libbpf.a -lelf $(USER_LIBS)
+XLIBS = -lbpf -lelf $(USER_LIBS)
 
 all: llvm-check $(USER_OBJ) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
 

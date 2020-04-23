@@ -484,7 +484,7 @@ dist-docs:
 
 include Documentation/automake.mk
 include m4/automake.mk
-include xdp/automake.mk
+include lib/xdp/automake.mk
 include lib/automake.mk
 include ofproto/automake.mk
 include utilities/automake.mk

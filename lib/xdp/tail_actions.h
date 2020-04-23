@@ -27,26 +27,34 @@ struct act_cursor {
     __u8 len; /* len of the whole xdp_flow_action as a multiple of u8 */
 };
 
-struct bpf_map_def SEC("maps") _tail_table = {
+struct bpf_map_def SEC("maps") tail_table = {
     .type = BPF_MAP_TYPE_PROG_ARRAY,
-    // .type = BPF_MAP_TYPE_PERCPU_HASH,
     .key_size = sizeof(__u32),
     .value_size = sizeof(__u32),
-    .max_entries = OVS_ACTION_ATTR_MAX,
+    .max_entries = TAIL_TABLE_SIZE,
 };
 
-struct bpf_map_def SEC("maps") _percpu_actions = {
+struct bpf_map_def SEC("maps") percpu_actions = {
     .type = BPF_MAP_TYPE_PERCPU_ARRAY,
     .key_size = sizeof(__u32),
     .value_size = sizeof(struct xdp_flow_actions),
     .max_entries = 1,
 };
 
-struct bpf_map_def SEC("maps") _flow_table = {
+struct bpf_map_def SEC("maps") flow_table = {
     .type = BPF_MAP_TYPE_HASH,
     .key_size = sizeof(struct xdp_flow_key),
     .value_size = sizeof(struct xdp_flow),
     .max_entries = 100,
+};
+
+/* NOTE: loading a xdp program for afxdp depends on the map being
+ * named 'xsks_map' */
+struct bpf_map_def SEC("maps") xsks_map = {
+	.type = BPF_MAP_TYPE_XSKMAP,
+	.key_size = sizeof(int),
+	.value_size = sizeof(int),
+	.max_entries = 64,  /* Assume netdev has no more than 64 queues */
 };
 
 #pragma GCC diagnostic push
@@ -71,11 +79,9 @@ static __always_inline int parse_flow_metadata(struct hdr_cursor *nh,
 static __always_inline int next_action(struct flow_metadata *fm)
 {
     struct xdp_flow_actions *actions;
-    struct act_cursor cur;
     __u32 k = 0;
 
-    memset(&cur, 0, sizeof(struct act_cursor));
-    actions = bpf_map_lookup_elem(&_percpu_actions, &k);
+    actions = bpf_map_lookup_elem(&percpu_actions, &k);
     if (!actions) {
         bpf_printk("Could not get percpu action\n");
         return -1;
@@ -91,14 +97,14 @@ static __always_inline int next_action(struct flow_metadata *fm)
     }
 
     // bound check
-    if (fm->offset + sizeof(struct act_cursor) > sizeof(actions->data)) {
+    if (fm->offset + 2 > MAX_ACTION_SIZE) {
         return -1;
     }
 
-    memcpy(&cur, &actions->data[fm->offset], sizeof(struct act_cursor));
-    fm->offset += cur.len;
+	struct act_cursor *cur = (struct act_cursor *)actions->data;
+	fm->offset += cur->len;
     fm->pos += 1;
-    return cur.type; 
+    return cur->type;
 }
 
 static __always_inline void tail_action(struct xdp_md *ctx)
@@ -123,15 +129,12 @@ static __always_inline void tail_action(struct xdp_md *ctx)
         bpf_printk("flow_metadata after next_action offset %x\n", fm->offset);
         bpf_printk("flow_action is: %d\n", flow_action);
         if (flow_action > 0 && flow_action < OVS_ACTION_ATTR_MAX) {
-            bpf_tail_call(ctx, &_tail_table, flow_action);
+            bpf_tail_call(ctx, &tail_table, flow_action);
         }    
 
     } else {
         bpf_printk("flow-metadata parse failed\n");
     }
-
-    // bpf_tail_call(ctx, &_tail_table, 1);
-    
 }
 
 static __always_inline int add_actions(struct xdp_md *ctx, 
