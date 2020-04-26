@@ -73,80 +73,80 @@ $(info "================ RUNNING =======================")
 # as a space-separated list
 #
 
-XDP_TARGETS = \
-	lib/xdp/actions \
-	lib/xdp/entry-point
+# XDP_TARGETS = \
+# 	lib/xdp/actions \
+# 	lib/xdp/entry-point
 
-USER_TARGETS = \
-	lib/xdp/datapath \
-	lib/xdp/flow \
-	lib/xdp/flow-table \
-	lib/xdp/loader
+# USER_TARGETS = \
+# 	lib/xdp/datapath \
+# 	lib/xdp/flow \
+# 	lib/xdp/flow-table \
+# 	lib/xdp/loader
 
-xdp_headers = \
-	lib/xdp/datapath.h \
-	lib/xdp/flow.h \
-	lib/xdp/flow-table.h \
-	lib/xdp/tail_actions.h \
-	lib/xdp/loader.h
+# xdp_headers = \
+# 	lib/xdp/datapath.h \
+# 	lib/xdp/flow.h \
+# 	lib/xdp/flow-table.h \
+# 	lib/xdp/tail_actions.h \
+# 	lib/xdp/loader.h
 
-helpers_headers = \
-	lib/xdp/headers/bpf_endian.h \
-	lib/xdp/headers/bpf_helpers.h \
-	lib/xdp/headers/bpf_util.h \
-	lib/xdp/headers/common_helpers.h \
-	lib/xdp/headers/jhash.h \
-	lib/xdp/headers/nsh.h \
-	lib/xdp/headers/parsing_helpers.h \
-	lib/xdp/headers/perf-sys.h \
-	lib/xdp/headers/rewrite_helpers.h \
-	lib/xdp/headers/linux/bpf.h \
-	lib/xdp/headers/linux/err.h \
-	lib/xdp/headers/linux/if_link.h
+# helpers_headers = \
+# 	lib/xdp/headers/bpf_endian.h \
+# 	lib/xdp/headers/bpf_helpers.h \
+# 	lib/xdp/headers/bpf_util.h \
+# 	lib/xdp/headers/common_helpers.h \
+# 	lib/xdp/headers/jhash.h \
+# 	lib/xdp/headers/nsh.h \
+# 	lib/xdp/headers/parsing_helpers.h \
+# 	lib/xdp/headers/perf-sys.h \
+# 	lib/xdp/headers/rewrite_helpers.h \
+# 	lib/xdp/headers/linux/bpf.h \
+# 	lib/xdp/headers/linux/err.h \
+# 	lib/xdp/headers/linux/if_link.h
 
-LLC ?= llc
-CLANG ?= clang
-CC ?= gcc
+# LLC ?= llc
+# CLANG ?= clang
+# CC ?= gcc
 
-EXTRA_DEPS =
-XDP_C = ${XDP_TARGETS:=.c}
-XDP_OBJ = ${XDP_C:.c=.o}
-USER_C := ${USER_TARGETS:=.c}
-USER_OBJ := ${USER_C:.c=.o}
+# EXTRA_DEPS =
+# XDP_C = ${XDP_TARGETS:=.c}
+# XDP_OBJ = ${XDP_C:.c=.o}
+# USER_C := ${USER_TARGETS:=.c}
+# USER_OBJ := ${USER_C:.c=.o}
 
-# Expect this is defined by including Makefile, but define if not
+# # Expect this is defined by including Makefile, but define if not
 
-OBJECT_LIBBPF = $(LIBBPF_DIR)/libbpf.a
+# OBJECT_LIBBPF = $(LIBBPF_DIR)/libbpf.a
 
-EXTRA_DEPS +=
+# EXTRA_DEPS +=
 
-XCFLAGS =
-# XCFLAGS ?= -I$(LIBBPF_DIR)/root/usr/include/ -g
-# Extra include for Ubuntu issue #44
-# XCFLAGS += -I/usr/include/x86_64-linux-gnu
-XCFLAGS += -Ilib/xdp/headers/
-LDFLAGS ?= -L$(LIBBPF_DIR)
+# XCFLAGS =
+# # XCFLAGS ?= -I$(LIBBPF_DIR)/root/usr/include/ -g
+# # Extra include for Ubuntu issue #44
+# # XCFLAGS += -I/usr/include/x86_64-linux-gnu
+# XCFLAGS += -Ilib/xdp/headers/
+# LDFLAGS ?= -L$(LIBBPF_DIR)
 
-XLIBS = -lbpf -lelf $(USER_LIBS)
+# XLIBS = -lbpf -lelf $(USER_LIBS)
 
-all: llvm-check $(USER_OBJ) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
+# all: llvm-check $(USER_OBJ) $(XDP_OBJ) $(COPY_LOADER) $(COPY_STATS)
 
-.PHONY: clean $(CLANG) $(LLC)
+# .PHONY: clean $(CLANG) $(LLC)
 
-# $(MAKE) -C $(LIBBPF_DIR) clean
-clean:
-	rm -f $(XDP_OBJ) $(USER_OBJ)
-	rm -f *.ll
-	rm -f *~
+# # $(MAKE) -C $(LIBBPF_DIR) clean
+# clean:
+# 	rm -f $(XDP_OBJ) $(USER_OBJ)
+# 	rm -f *.ll
+# 	rm -f *~
 
 
-llvm-check: $(CLANG) $(LLC)
-	@for TOOL in $^ ; do \
-		if [ ! $$(command -v $${TOOL} 2>/dev/null) ]; then \
-			echo "*** ERROR: Cannot find tool $${TOOL}" ;\
-			exit 1; \
-		else true; fi; \
-	done
+# llvm-check: $(CLANG) $(LLC)
+# 	@for TOOL in $^ ; do \
+# 		if [ ! $$(command -v $${TOOL} 2>/dev/null) ]; then \
+# 			echo "*** ERROR: Cannot find tool $${TOOL}" ;\
+# 			exit 1; \
+# 		else true; fi; \
+# 	done
 
 # $(OBJECT_LIBBPF):
 # 	@if [ ! -d $(LIBBPF_DIR) ]; then \
@@ -160,26 +160,26 @@ llvm-check: $(CLANG) $(LLC)
 
 # Makefile $(EXTRA_DEPS)
 
-$(USER_OBJ): %.o: %.c %.h 
-	$(CC) $(XCFLAGS) -c -o $@ $<
+# $(USER_OBJ): %.o: %.c %.h 
+# 	$(CC) $(XCFLAGS) -c -o $@ $<
 
-$(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
-	$(CLANG) -S \
-	    -target bpf \
-	    -D __BPF_TRACING__ \
-	    $(XCFLAGS) \
-	    -Wall \
-	    -Wno-unused-value \
-	    -Wno-pointer-sign \
-	    -Wno-compare-distinct-pointer-types \
-	    -Werror \
-	    -O2 -emit-llvm -c -g -o ${@:.o=.ll} $<
-	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
+# $(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
+# 	$(CLANG) -S \
+# 	    -target bpf \
+# 	    -D __BPF_TRACING__ \
+# 	    $(XCFLAGS) \
+# 	    -Wall \
+# 	    -Wno-unused-value \
+# 	    -Wno-pointer-sign \
+# 	    -Wno-compare-distinct-pointer-types \
+# 	    -Werror \
+# 	    -O2 -emit-llvm -c -g -o ${@:.o=.ll} $<
+# 	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
 
 # libxdp.${SHARED_LIBRARY_EXTENSION}: ${USER_OBJ}
 # 	$(CC) ${SHARED_LIBRARY_FLAG} -o $@ $^
 
-EXTRA_DIST += $(USER_C) $(XDP_C) $(xdp_headers) $(helpers_headers)
+# EXTRA_DIST += $(USER_C) $(XDP_C) $(xdp_headers) $(helpers_headers)
 
 # if HAVE_XDP
 # dist_xdp_DATA += $(USER_OBJ)
@@ -221,3 +221,64 @@ EXTRA_DIST += $(USER_C) $(XDP_C) $(xdp_headers) $(helpers_headers)
 # 	xdp/flow-table.h \
 # 	xdp/loader.c \
 # 	xdp/loader.h
+
+lib_LTLIBRARIES = xdp/libxdp.la
+xdp_libxdp_la_SOURCES =
+
+xdp_libxdp_la_LIBADD = \
+    xdp/libxdpuser.la \
+    xdp/actions.o \
+    xdp/entry-point.o
+
+noinst_LTLIBRARIES += xdp/libxdpuser.la
+
+xdp_libxdpuser_la_SOURCES = \
+    xdp/datapath.c \
+	xdp/datapath.h \
+    xdp/flow-table.c \
+	xdp/flow-table.h \
+    xdp/flow.c \
+	xdp/flow.h \
+    xdp/loader.c \
+	xdp/loader.h
+
+xdp_libxdpuser_la_LDFLAGS = \
+        $(OVS_LTINFO) \
+        $(AM_LDFLAGS)
+
+XDP_TARGETS = \
+	xdp/actions \
+	xdp/entry-point
+
+LLC ?= llc
+CLANG ?= clang
+
+XDP_C = ${XDP_TARGETS:=.c}
+XDP_OBJ = ${XDP_C:.c=.o}
+
+all: $(XDP_OBJ)
+
+llvm-check: $(CC) $(LLC)
+	@for TOOL in $^ ; do \
+		if [ ! $$(command -v $${TOOL} 2>/dev/null) ]; then \
+			echo "*** ERROR: Cannot find tool $${TOOL}" ;\
+			exit 1; \
+		else true; fi; \
+	done
+
+$(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
+	$(CC) -S \
+	    -target bpf \
+	    -D __BPF_TRACING__ \
+	    $(XCFLAGS) \
+	    -Wall \
+	    -Wno-unused-value \
+	    -Wno-pointer-sign \
+	    -Wno-compare-distinct-pointer-types \
+	    -Werror \
+	    -O2 -emit-llvm -c -g -o ${@:.o=.ll} $<
+	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
+
+CLEANFILES += \
+	xdp/actions.ll \
+	xdp/entry-point.ll

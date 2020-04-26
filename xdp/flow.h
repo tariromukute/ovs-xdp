@@ -19,7 +19,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <net/if_arp.h>
-#include "bpf_endian.h"
+#include <bpf/bpf_endian.h>
 #include "nsh.h"
 
 #ifndef memcpy

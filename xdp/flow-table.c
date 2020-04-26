@@ -18,7 +18,7 @@ void ovs_flow_exit()
 
 struct xdp_flow *ovs_flow_alloc()
 {
-    struct xdp_flow *flow;
+    struct xdp_flow *flow = NULL;
     /* TODO: implement method */
 
     return flow;
@@ -73,7 +73,7 @@ int  ovs_flow_tbl_num_masks()
 
 struct xdp_flow *ovs_flow_tbl_lookup(const struct xdp_flow_key *key)
 {
-    struct xdp_flow *flow;
+    struct xdp_flow *flow = NULL;
     /* TODO: implement method */
 
     return flow;
@@ -81,7 +81,7 @@ struct xdp_flow *ovs_flow_tbl_lookup(const struct xdp_flow_key *key)
 
 struct xdp_flow *ovs_flow_tbl_lookup_ufid(const struct xdp_flow_id *id)
 {
-    struct xdp_flow *flow;
+    struct xdp_flow *flow = NULL;
     /* TODO: implement method */
 
     return flow;

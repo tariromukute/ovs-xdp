@@ -9,7 +9,7 @@
 
 #include <linux/bpf.h>
 #include <stdbool.h>
-#include "bpf_helpers.h"
+#include <bpf/bpf_helpers.h>
 #include "flow.h"
 
 struct flow_table {
@@ -31,14 +31,14 @@ void ovs_flow_exit(void);
 struct xdp_flow *ovs_flow_alloc(void);
 void ovs_flow_free(struct xdp_flow *, bool deferred);
 
-int ovs_flow_tbl_init();
-int ovs_flow_tbl_count();
-void ovs_flow_tbl_destroy();
-int ovs_flow_tbl_flush();
+int ovs_flow_tbl_init(void);
+int ovs_flow_tbl_count(void);
+void ovs_flow_tbl_destroy(void);
+int ovs_flow_tbl_flush(void);
 
 int ovs_flow_tbl_insert(struct xdp_flow *flow);
 void ovs_flow_tbl_remove(struct xdp_flow *flow);
-int  ovs_flow_tbl_num_masks();
+int  ovs_flow_tbl_num_masks(void);
 struct xdp_flow *ovs_flow_tbl_lookup(const struct xdp_flow_key *);
 struct xdp_flow *ovs_flow_tbl_lookup_ufid(const struct xdp_flow_id *);
 

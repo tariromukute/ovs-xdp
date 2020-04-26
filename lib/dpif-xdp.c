@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <linux/bpf.h>
+#include <bpf/xsk.h>
 // #include <bpf/libbpf.h>
 
 #include "bitmap.h"
@@ -66,8 +67,7 @@
 #include "uuid.h"
 #include "hash.h"
 #include "uuid.h"
-
-#include "xdp/loader.h"
+#include "loader.h"
 
 /* ================================================================
     The xdp uses more or less the same datapath as netdev, only

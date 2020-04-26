@@ -13,6 +13,12 @@ AM_CPPFLAGS = $(SSL_CFLAGS)
 AM_LDFLAGS = $(SSL_LDFLAGS)
 AM_LDFLAGS += $(OVS_LDFLAGS)
 
+# NOTE: was getting a multiple definition error when loading the library xdp/libxdp.la when
+# compiling the libopenvswitch (lib_libopenvswitch_la_LIBADD += xdp/libxdp.la). Adding these
+# flags suppressed the error. There is probably a cleaner way but yooh the autotools are showing
+# me flames so going with this for now until I get an advised solution
+AM_LDFLAGS += -Wl,--allow-multiple-definition
+
 if WIN32
 AM_CPPFLAGS += -I $(top_srcdir)/include/windows
 AM_CPPFLAGS += -I $(top_srcdir)/datapath-windows/include
@@ -27,9 +33,9 @@ AM_CPPFLAGS += -I $(top_srcdir)/include
 AM_CPPFLAGS += -I $(top_builddir)/include
 AM_CPPFLAGS += -I $(top_srcdir)/lib
 AM_CPPFLAGS += -I $(top_builddir)/lib
-AM_CPPFLAGS += -I $(top_builddir)/xdp
+# AM_CPPFLAGS += -I $(top_builddir)/xdp
 AM_CPPFLAGS += -I $(top_srcdir)/xdp
-AM_CPPFLAGS += -I $(top_srcdir)/xdp/headers
+# AM_CPPFLAGS += -I $(top_srcdir)/xdp/headers
 
 AM_CPPFLAGS += $(SSL_INCLUDES)
 
@@ -484,7 +490,7 @@ dist-docs:
 
 include Documentation/automake.mk
 include m4/automake.mk
-include lib/xdp/automake.mk
+include xdp/automake.mk
 include lib/automake.mk
 include ofproto/automake.mk
 include utilities/automake.mk

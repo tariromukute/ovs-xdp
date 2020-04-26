@@ -2,7 +2,7 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <bpf/xsk.h>
-#include <linux/if_link.h>
+// #include <linux/if_link.h>
 #include <net/if.h>
 #include <errno.h>
 #include <unistd.h>
@@ -35,16 +35,15 @@ struct config {
 static const char *default_filename = "xdp_prog_kern.o";
 static const char *action_filename = "actions.o";
 static const char *pin_basedir = "/sys/fs/bpf";
-static const char *prog_pin_dir = "/sys/fs/bpf/prog";
 static const char *prog_map_name = "tail_table";
 static const char *prog_name = "process";
 
 
-static inline __u32 xsk_ring_prod__free(struct xsk_ring_prod *r)
-{
-	r->cached_cons = *r->consumer + r->size;
-	return r->cached_cons - r->cached_prod;
-}
+// static inline __u32 xsk_ring_prod__free(struct xsk_ring_prod *r)
+// {
+// 	r->cached_cons = *r->consumer + r->size;
+// 	return r->cached_cons - r->cached_prod;
+// }
 
 
 static struct xsk_umem_info *configure_xsk_umem(void *buffer, uint64_t size)
@@ -196,6 +195,16 @@ void xsk_sock_destroy(struct xsk_socket_info *sock)
 	xsk_umem__delete(sock->umem->umem);
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+int xsk_sock_close(struct xsk_socket_info *sock)
+{
+    // TODO: implement method
+
+    return 0;
+}
+#pragma GCC diagnostic pop
+
 
 static struct bpf_object *open_bpf_object(const char *file, int ifindex)
 {
@@ -333,7 +342,7 @@ static int pin_unpinned_maps(struct bpf_object *obj, struct config *cfg)
     return 0;
 }
 
-int load_attach_program(const char *filename, struct config *cfg)
+static int load_attach_program(const char *filename, struct config *cfg)
 {
     int prog_fd;
     struct bpf_object *obj;
@@ -397,7 +406,7 @@ int load_attach_program(const char *filename, struct config *cfg)
     return 0;
 }
 
-int load_update_prog_map(const char *filename, struct config *cfg)
+static int load_update_prog_map(const char *filename, struct config *cfg)
 {
     int prog_fd;
     struct bpf_object *obj;

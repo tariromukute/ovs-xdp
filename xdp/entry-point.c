@@ -7,8 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <net/if_arp.h>
-#include "bpf_helpers.h"
-#include "bpf_endian.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 #include "nsh.h"
 #include "flow.h"
 #include "tail_actions.h"

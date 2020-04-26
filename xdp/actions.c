@@ -4,8 +4,8 @@
 #include <linux/bpf.h>
 #include <linux/in.h>
 #include <linux/openvswitch.h>
-#include "bpf_helpers.h"
-#include "bpf_endian.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 #include "tail_actions.h"
 
 // The parsing helper functions from the packet01 lesson have moved here
