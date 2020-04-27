@@ -13,23 +13,23 @@
 
 VLOG_DEFINE_THIS_MODULE(xdp_loader);
 struct config {
-	__u32 xdp_flags;
-	int ifindex;
-	char *ifname;
-	char ifname_buf[IF_NAMESIZE];
-	int redirect_ifindex;
-	char *redirect_ifname;
-	char redirect_ifname_buf[IF_NAMESIZE];
-	bool do_unload;
-	bool reuse_maps;
-	char pin_dir[512];
-	char filename[512];
-	char progsec[32];
-	char src_mac[18];
-	char dest_mac[18];
-	__u16 xsk_bind_flags;
-	int xsk_if_queue;
-	bool xsk_poll_mode;
+    __u32 xdp_flags;
+    int ifindex;
+    char *ifname;
+    char ifname_buf[IF_NAMESIZE];
+    int redirect_ifindex;
+    char *redirect_ifname;
+    char redirect_ifname_buf[IF_NAMESIZE];
+    bool do_unload;
+    bool reuse_maps;
+    char pin_dir[512];
+    char filename[512];
+    char progsec[32];
+    char src_mac[18];
+    char dest_mac[18];
+    __u16 xsk_bind_flags;
+    int xsk_if_queue;
+    bool xsk_poll_mode;
 };
 
 static const char *default_filename = "xdp_prog_kern.o";
@@ -41,123 +41,122 @@ static const char *prog_name = "process";
 
 // static inline __u32 xsk_ring_prod__free(struct xsk_ring_prod *r)
 // {
-// 	r->cached_cons = *r->consumer + r->size;
-// 	return r->cached_cons - r->cached_prod;
+//     r->cached_cons = *r->consumer + r->size;
+//     return r->cached_cons - r->cached_prod;
 // }
 
 
 static struct xsk_umem_info *configure_xsk_umem(void *buffer, uint64_t size)
 {
-	struct xsk_umem_info *umem;
-	int ret;
+    struct xsk_umem_info *umem;
+    int ret;
 
-	umem = calloc(1, sizeof(*umem));
-	if (!umem)
-		return NULL;
+    umem = calloc(1, sizeof(*umem));
+    if (!umem)
+        return NULL;
 
-	ret = xsk_umem__create(&umem->umem, buffer, size, &umem->fq, &umem->cq,
-			       NULL);
-	if (ret) {
-		errno = -ret;
-		return NULL;
-	}
+    ret = xsk_umem__create(&umem->umem, buffer, size, &umem->fq, &umem->cq,
+                   NULL);
+    if (ret) {
+        errno = -ret;
+        return NULL;
+    }
 
-	umem->buffer = buffer;
-	return umem;
+    umem->buffer = buffer;
+    return umem;
 }
 
 static uint64_t xsk_alloc_umem_frame(struct xsk_socket_info *xsk)
 {
-	uint64_t frame;
-	if (xsk->umem_frame_free == 0)
-		return INVALID_UMEM_FRAME;
+    uint64_t frame;
+    if (xsk->umem_frame_free == 0)
+        return INVALID_UMEM_FRAME;
 
-	frame = xsk->umem_frame_addr[--xsk->umem_frame_free];
-	xsk->umem_frame_addr[xsk->umem_frame_free] = INVALID_UMEM_FRAME;
-	return frame;
+    frame = xsk->umem_frame_addr[--xsk->umem_frame_free];
+    xsk->umem_frame_addr[xsk->umem_frame_free] = INVALID_UMEM_FRAME;
+    return frame;
 }
 
 static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
-						    struct xsk_umem_info *umem)
+                            struct xsk_umem_info *umem)
 {
-	struct xsk_socket_config xsk_cfg;
-	struct xsk_socket_info *xsk_info;
-	uint32_t idx;
-	uint32_t prog_id = 0;
-	int i;
-	int ret;
+    struct xsk_socket_config xsk_cfg;
+    struct xsk_socket_info *xsk_info;
+    uint32_t idx;
+    uint32_t prog_id = 0;
+    int i;
+    int ret;
 
-	xsk_info = calloc(1, sizeof(*xsk_info));
-	if (!xsk_info)
-		return NULL;
+    xsk_info = calloc(1, sizeof(*xsk_info));
+    if (!xsk_info)
+        return NULL;
 
-	xsk_info->umem = umem;
-	xsk_cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
-	xsk_cfg.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS;
-	xsk_cfg.libbpf_flags = 0;
-	xsk_cfg.xdp_flags = cfg->xdp_flags;
-	xsk_cfg.bind_flags = cfg->xsk_bind_flags;
-	ret = xsk_socket__create(&xsk_info->xsk, cfg->ifname,
-				 cfg->xsk_if_queue, umem->umem, &xsk_info->rx,
-				 &xsk_info->tx, &xsk_cfg);
+    xsk_info->umem = umem;
+    xsk_cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
+    xsk_cfg.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS;
+    xsk_cfg.libbpf_flags = 0;
+    xsk_cfg.xdp_flags = cfg->xdp_flags;
+    xsk_cfg.bind_flags = cfg->xsk_bind_flags;
+    ret = xsk_socket__create(&xsk_info->xsk, cfg->ifname,
+                 cfg->xsk_if_queue, umem->umem, &xsk_info->rx,
+                 &xsk_info->tx, &xsk_cfg);
 
-	if (ret)
-		goto error_exit;
+    if (ret)
+        goto error_exit;
 
-	ret = bpf_get_link_xdp_id(cfg->ifindex, &prog_id, cfg->xdp_flags);
-	if (ret)
-		goto error_exit;
+    ret = bpf_get_link_xdp_id(cfg->ifindex, &prog_id, cfg->xdp_flags);
+    if (ret)
+        goto error_exit;
 
-	/* Initialize umem frame allocation */
+    /* Initialize umem frame allocation */
 
-	for (i = 0; i < NUM_FRAMES; i++)
-		xsk_info->umem_frame_addr[i] = i * FRAME_SIZE;
+    for (i = 0; i < NUM_FRAMES; i++)
+        xsk_info->umem_frame_addr[i] = i * FRAME_SIZE;
 
-	xsk_info->umem_frame_free = NUM_FRAMES;
+    xsk_info->umem_frame_free = NUM_FRAMES;
 
-	/* Stuff the receive path with buffers, we assume we have enough */
-	ret = xsk_ring_prod__reserve(&xsk_info->umem->fq,
-				     XSK_RING_PROD__DEFAULT_NUM_DESCS,
-				     &idx);
+    /* Stuff the receive path with buffers, we assume we have enough */
+    ret = xsk_ring_prod__reserve(&xsk_info->umem->fq,
+                     XSK_RING_PROD__DEFAULT_NUM_DESCS,
+                     &idx);
 
-	if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
-		goto error_exit;
+    if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
+        goto error_exit;
 
-	for (i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i ++)
-		*xsk_ring_prod__fill_addr(&xsk_info->umem->fq, idx++) =
-			xsk_alloc_umem_frame(xsk_info);
+    for (i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i ++)
+        *xsk_ring_prod__fill_addr(&xsk_info->umem->fq, idx++) =
+            xsk_alloc_umem_frame(xsk_info);
 
-	xsk_ring_prod__submit(&xsk_info->umem->fq,
-			      XSK_RING_PROD__DEFAULT_NUM_DESCS);
+    xsk_ring_prod__submit(&xsk_info->umem->fq,
+                  XSK_RING_PROD__DEFAULT_NUM_DESCS);
 
-	return xsk_info;
+    return xsk_info;
 
 error_exit:
-	errno = -ret;
-	return NULL;
+    errno = -ret;
+    return NULL;
 }
 
 int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname)
 {
     void *packet_buffer;
-	uint64_t packet_buffer_size;
+    uint64_t packet_buffer_size;
     struct config cfg = {
-		.xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
-		.ifindex   = -1,
-		.do_unload = false,
-	};
+        .xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
+        .ifindex   = -1,
+        .do_unload = false,
+    };
     cfg.ifname = (char *)&cfg.ifname_buf;
     strncpy(cfg.ifname, ifname, IF_NAMESIZE);
     cfg.ifindex = if_nametoindex(cfg.ifname);
     struct rlimit rlim = {RLIM_INFINITY, RLIM_INFINITY};
-	struct xsk_umem_info *umem;
+    struct xsk_umem_info *umem;
 
     /* Allow unlimited locking of memory, so all memory needed for packet
     * buffers can be locked.
     */
     if (setrlimit(RLIMIT_MEMLOCK, &rlim)) {
-        VLOG_INFO("ERROR: setrlimit(RLIMIT_MEMLOCK) \"%s\"\n",
-            strerror(errno));
+        VLOG_INFO("ERROR: setrlimit(RLIMIT_MEMLOCK)");
         return EXIT_FAIL;
     }
     /* Allocate memory for NUM_FRAMES of the default XDP frame size */
@@ -165,24 +164,21 @@ int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname)
     if (posix_memalign(&packet_buffer,
             getpagesize(), /* PAGE_SIZE aligned */
             packet_buffer_size)) {
-        VLOG_INFO("ERROR: Can't allocate buffer memory \"%s\"\n",
-            strerror(errno));
+        VLOG_INFO("ERROR: Can't allocate buffer memory");
         return EXIT_FAIL;
     }
 
     /* Initialize shared packet_buffer for umem usage */
     umem = configure_xsk_umem(packet_buffer, packet_buffer_size);
     if (umem == NULL) {
-        VLOG_INFO("ERROR: Can't create umem \"%s\"\n",
-            strerror(errno));
+        VLOG_INFO("ERROR: Can't create umem");
         return EXIT_FAIL;
     }
 
     /* Open and configure the AF_XDP (xsk) socket */
     *sock = xsk_configure_socket(&cfg, umem);
     if (sock == NULL) {
-        VLOG_INFO("ERROR: Can't setup AF_XDP socket \"%s\"\n",
-            strerror(errno));
+        VLOG_INFO("ERROR: Can't setup AF_XDP socket");
         return EXIT_FAIL;
     }
 
@@ -192,7 +188,7 @@ int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname)
 void xsk_sock_destroy(struct xsk_socket_info *sock)
 {
     xsk_socket__delete(sock->xsk);
-	xsk_umem__delete(sock->umem->umem);
+    xsk_umem__delete(sock->umem->umem);
 }
 
 #pragma GCC diagnostic push
@@ -387,9 +383,9 @@ static int load_attach_program(const char *filename, struct config *cfg)
         return EXIT_FAIL_BPF;
     }
     /* At this point: BPF-progs are (only) loaded by the kernel, and prog_fd
-	 * is our select file-descriptor handle. Next step is attaching this FD
-	 * to a kernel hook point, in this case XDP net_device link-level hook.
-	 */
+     * is our select file-descriptor handle. Next step is attaching this FD
+     * to a kernel hook point, in this case XDP net_device link-level hook.
+     */
     err = link_attach(cfg->ifindex, cfg->xdp_flags, prog_fd);
     if (err)
     {
@@ -497,10 +493,10 @@ int xdp_load(const char *ifname)
 {
     int err;
     struct config cfg = {
-		.xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
-		.ifindex   = -1,
-		.do_unload = false,
-	};
+        .xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
+        .ifindex   = -1,
+        .do_unload = false,
+    };
     strcpy(cfg.progsec, prog_name);
     cfg.ifname = (char *)&cfg.ifname_buf;
     strncpy(cfg.ifname, ifname, IF_NAMESIZE);
@@ -509,10 +505,10 @@ int xdp_load(const char *ifname)
 
 
     int len = snprintf(cfg.pin_dir, PATH_MAX, "%s/%s", pin_basedir, cfg.ifname);
-	if (len < 0) {
-		VLOG_INFO("ERR: creating pin dirname\n");
-		return EXIT_FAIL_OPTION;
-	}
+    if (len < 0) {
+        VLOG_INFO("ERR: creating pin dirname\n");
+        return EXIT_FAIL_OPTION;
+    }
 
     err = load_attach_program(default_filename, &cfg);
     if (err) {

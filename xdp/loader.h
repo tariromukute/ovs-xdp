@@ -33,44 +33,44 @@ extern "C" {
 
 /* XDP section */
 
-#define XDP_FLAGS_UPDATE_IF_NOEXIST	(1U << 0)
-#define XDP_FLAGS_SKB_MODE		(1U << 1)
-#define XDP_FLAGS_DRV_MODE		(1U << 2)
-#define XDP_FLAGS_HW_MODE		(1U << 3)
-#define XDP_FLAGS_MODES			(XDP_FLAGS_SKB_MODE | \
-					 XDP_FLAGS_DRV_MODE | \
-					 XDP_FLAGS_HW_MODE)
-#define XDP_FLAGS_MASK			(XDP_FLAGS_UPDATE_IF_NOEXIST | \
-					 XDP_FLAGS_MODES)
+#define XDP_FLAGS_UPDATE_IF_NOEXIST    (1U << 0)
+#define XDP_FLAGS_SKB_MODE        (1U << 1)
+#define XDP_FLAGS_DRV_MODE        (1U << 2)
+#define XDP_FLAGS_HW_MODE        (1U << 3)
+#define XDP_FLAGS_MODES            (XDP_FLAGS_SKB_MODE | \
+                     XDP_FLAGS_DRV_MODE | \
+                     XDP_FLAGS_HW_MODE)
+#define XDP_FLAGS_MASK            (XDP_FLAGS_UPDATE_IF_NOEXIST | \
+                     XDP_FLAGS_MODES)
                      
 struct xsk_umem_info {
-	struct xsk_ring_prod fq;
-	struct xsk_ring_cons cq;
-	struct xsk_umem *umem;
-	void *buffer;
+    struct xsk_ring_prod fq;
+    struct xsk_ring_cons cq;
+    struct xsk_umem *umem;
+    void *buffer;
 };
 
 struct stats_record {
-	uint64_t timestamp;
-	uint64_t rx_packets;
-	uint64_t rx_bytes;
-	uint64_t tx_packets;
-	uint64_t tx_bytes;
+    uint64_t timestamp;
+    uint64_t rx_packets;
+    uint64_t rx_bytes;
+    uint64_t tx_packets;
+    uint64_t tx_bytes;
 };
 
 struct xsk_socket_info {
-	struct xsk_ring_cons rx;
-	struct xsk_ring_prod tx;
-	struct xsk_umem_info *umem;
-	struct xsk_socket *xsk;
+    struct xsk_ring_cons rx;
+    struct xsk_ring_prod tx;
+    struct xsk_umem_info *umem;
+    struct xsk_socket *xsk;
 
-	uint64_t umem_frame_addr[NUM_FRAMES];
-	uint32_t umem_frame_free;
+    uint64_t umem_frame_addr[NUM_FRAMES];
+    uint32_t umem_frame_free;
 
-	uint32_t outstanding_tx;
+    uint32_t outstanding_tx;
 
-	struct stats_record stats;
-	struct stats_record prev_stats;
+    struct stats_record stats;
+    struct stats_record prev_stats;
 };
 
 int link_detach(int ifindex, __u32 xdp_flags, __u32 expected_prog_id);

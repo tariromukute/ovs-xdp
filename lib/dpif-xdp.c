@@ -462,7 +462,7 @@ answer_port_query(const struct dp_xdp_port *port,
 static uint32_t
 hash_port_no(odp_port_t port_no)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s, port_no: %d ----", __func__, odp_to_u32(port_no));
     return hash_int(odp_to_u32(port_no), 0);
 }
 
@@ -613,7 +613,7 @@ static int
 port_create(const char *devname, const char *type,
             odp_port_t port_no, struct dp_xdp_port **portp)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s, port_no: %d ----", __func__, odp_to_u32(port_no));
     int error = 0;
     struct dp_xdp_port *port;
     enum netdev_flags flags;
@@ -690,11 +690,16 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
 
     hmap_insert(&dp->ports, &port->node, hash_port_no(port_no));
     seq_change(dp->port_seq);
-
+    VLOG_INFO("after hash_port_no");
     // configure ep
     if (strcmp(devname, "ovs-xdp") != 0) {
+        VLOG_INFO("before dp_xdp_configure_ep");
         error = dp_xdp_configure_ep(ep, dp, port_no, devname);
+        VLOG_INFO("after dp_xdp_configure_ep");
+    } else {
+        goto out;
     }
+    VLOG_INFO("after strcmp");
     if (error) {
         goto out;
     }
@@ -756,6 +761,7 @@ static bool
 port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
                uint32_t *upcall_pid)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     /* Since the nl_sock can only be assigned in either all
      * or none "dpif" channels, the following check
      * would suffice. */
@@ -772,6 +778,7 @@ static int
 create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp, const char *name)
     OVS_REQ_WRLOCK(dp->upcall_lock)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     return xsk_sock_create(&sockp, name);
 }
 
@@ -779,6 +786,7 @@ static int
 port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
                   struct xsk_socket_info *sock)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
 
@@ -818,6 +826,7 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
 static void
 port_del_channels(struct dp_xdp *dp, odp_port_t port_no)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
 
@@ -1986,14 +1995,15 @@ static int
 dpif_xdp_port_dump_start(const struct dpif *dpif, void **statep)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    struct dp_xdp *dp = get_dp_xdp(dpif);
-    struct dpif_xdp_port_state state;
+    // struct dp_xdp *dp = get_dp_xdp(dpif);
+    // struct dpif_xdp_port_state state;
 
-    if (!dpif_xdp_port_dump_start__(dp, &state)){
-        *statep = &state;
-    } else {
-        return EOF;
-    }
+    // if (!dpif_xdp_port_dump_start__(dp, &state)){
+    //     *statep = &state;
+    // } else {
+    //     return EOF;
+    // }
+    *statep = xzalloc(sizeof(struct dpif_xdp_port_state));
     return 0;
 }
 
@@ -2007,12 +2017,14 @@ dpif_xdp_port_dump_next__(const struct dp_xdp *dp, struct dpif_xdp_port_state *s
     struct hmap_node *node;
     int retval = 0;
 
+    ovs_mutex_lock(&dp->port_mutex);
     node = hmap_at_position(&dp->ports, &state->position);
     if (node) {
-
+        VLOG_INFO("-- node not null --");
         port = CONTAINER_OF(node, struct dp_xdp_port, node);
-
-        free(state->name);
+        VLOG_INFO("-- after  CONTAINER_OF --");
+        // free(state->name);
+        VLOG_INFO("-- after free --");
         state->name = xstrdup(netdev_get_name(port->netdev));
         VLOG_INFO("--- port name: %s ---", state->name);
         retval = 0;
@@ -2020,6 +2032,7 @@ dpif_xdp_port_dump_next__(const struct dp_xdp *dp, struct dpif_xdp_port_state *s
         VLOG_INFO("---- returning error in %s ----", __func__);
         retval = EOF;
     }
+    ovs_mutex_unlock(&dp->port_mutex);
     return retval;
 }
 static int
@@ -2032,7 +2045,7 @@ dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
     struct hmap_node *node;
     int retval = 0;
 
-    VLOG_INFO("---- dp name: %s in func %s ----", dp->name, __func__);
+    VLOG_INFO("---- dp name: %s in func %s, bucket: %d, offset: %d ----", dp->name, __func__, state->position.bucket, state->position.offset);
     
     ovs_mutex_lock(&dp->port_mutex);
     struct dp_xdp_port port;
@@ -2516,51 +2529,51 @@ static int
 xsk_socket_read(struct xsk_socket_info *xsk, int num_socks, struct pollfd *fds, struct ofpbuf *buf)
 {
     unsigned int rcvd, i;
-	__u32 idx_rx = 0, idx_fq = 0;
-	int ret;
+    __u32 idx_rx = 0, idx_fq = 0;
+    int ret;
     int opt_timeout = -1;
 
-	rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
-	if (!rcvd) {
-		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-			ret = poll(fds, num_socks, opt_timeout);
-		return 0;
-	}
+    rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
+    if (!rcvd) {
+        if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
+            ret = poll(fds, num_socks, opt_timeout);
+        return 0;
+    }
 
     if (rcvd > 1) {
         VLOG_INFO("!!!!!!!!!!!! This program doesn't support batch processing yet !!!!!!!!!!");
         return -1;
     }
 
-	ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
-	while (ret != rcvd) {
-		if (ret < 0)
-			return ret; // TODO: check if it's the appropriate way to respond to error
-		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-			ret = poll(fds, num_socks, opt_timeout);
-		ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
-	}
+    ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
+    while (ret != rcvd) {
+        if (ret < 0)
+            return ret; // TODO: check if it's the appropriate way to respond to error
+        if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
+            ret = poll(fds, num_socks, opt_timeout);
+        ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
+    }
 
-	for (i = 0; i < rcvd; i++) {
-		__u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
-		__u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
-		__u64 orig = xsk_umem__extract_addr(addr);
+    for (i = 0; i < rcvd; i++) {
+        __u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
+        __u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
+        __u64 orig = xsk_umem__extract_addr(addr);
 
-		addr = xsk_umem__add_offset_to_addr(addr);
-		struct ovs_xsk_event *e = xsk_umem__get_data(xsk->umem->buffer, addr);
-		hex_dump(e, len, addr); // for debug
+        addr = xsk_umem__add_offset_to_addr(addr);
+        struct ovs_xsk_event *e = xsk_umem__get_data(xsk->umem->buffer, addr);
+        hex_dump(e, len, addr); // for debug
 
         // TODO: factor for batch processing
         int event_len = e->header.pkt_len + sizeof(struct xdp_upcall);
         ofpbuf_clear(buf); 
         ofpbuf_push(buf, e, event_len);
 
-		*xsk_ring_prod__fill_addr(&xsk->umem->fq, idx_fq++) = orig;
-	}
+        *xsk_ring_prod__fill_addr(&xsk->umem->fq, idx_fq++) = orig;
+    }
 
-	xsk_ring_prod__submit(&xsk->umem->fq, rcvd);
-	xsk_ring_cons__release(&xsk->rx, rcvd);
-	xsk->stats.rx_packets += rcvd;
+    xsk_ring_prod__submit(&xsk->umem->fq, rcvd);
+    xsk_ring_cons__release(&xsk->rx, rcvd);
+    xsk->stats.rx_packets += rcvd;
     return 0;
 }
 

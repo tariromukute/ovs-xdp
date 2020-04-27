@@ -245,7 +245,7 @@ xdp_libxdpuser_la_SOURCES = \
 xdp_libxdpuser_la_LDFLAGS = \
         $(OVS_LTINFO) \
         $(AM_LDFLAGS)
-
+	
 XDP_TARGETS = \
 	xdp/actions \
 	xdp/entry-point
@@ -278,6 +278,16 @@ $(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
 	    -Werror \
 	    -O2 -emit-llvm -c -g -o ${@:.o=.ll} $<
 	$(LLC) -march=bpf -filetype=obj -o $@ ${@:.o=.ll}
+
+EXTRA_DIST += \
+	xdp/README \
+	xdp/nsh.h \
+	xdp/parsing_helpers.h \
+	xdp/rewrite_helpers.h \
+	xdp/tail_actions.h \
+	$(XDP_C)
+
+
 
 CLEANFILES += \
 	xdp/actions.ll \

@@ -2622,6 +2622,7 @@ struct dp_netdev_port_state {
 static int
 dpif_netdev_port_dump_start(const struct dpif *dpif OVS_UNUSED, void **statep)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     *statep = xzalloc(sizeof(struct dp_netdev_port_state));
     return 0;
 }
@@ -2630,11 +2631,13 @@ static int
 dpif_netdev_port_dump_next(const struct dpif *dpif, void *state_,
                            struct dpif_port *dpif_port)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_netdev_port_state *state = state_;
     struct dp_netdev *dp = get_dp_netdev(dpif);
     struct hmap_node *node;
     int retval;
 
+    VLOG_INFO("---- dp name: %s in func %s, bucket: %d, offset: %d ----", dp->name, __func__, state->position.bucket, state->position.offset);
     ovs_mutex_lock(&dp->port_mutex);
     node = hmap_at_position(&dp->ports, &state->position);
     if (node) {
@@ -2660,6 +2663,7 @@ dpif_netdev_port_dump_next(const struct dpif *dpif, void *state_,
 static int
 dpif_netdev_port_dump_done(const struct dpif *dpif OVS_UNUSED, void *state_)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_netdev_port_state *state = state_;
     free(state->name);
     free(state);

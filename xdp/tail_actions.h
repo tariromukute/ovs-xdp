@@ -51,10 +51,10 @@ struct bpf_map_def SEC("maps") flow_table = {
 /* NOTE: loading a xdp program for afxdp depends on the map being
  * named 'xsks_map' */
 struct bpf_map_def SEC("maps") xsks_map = {
-	.type = BPF_MAP_TYPE_XSKMAP,
-	.key_size = sizeof(int),
-	.value_size = sizeof(int),
-	.max_entries = 64,  /* Assume netdev has no more than 64 queues */
+    .type = BPF_MAP_TYPE_XSKMAP,
+    .key_size = sizeof(int),
+    .value_size = sizeof(int),
+    .max_entries = 64,  /* Assume netdev has no more than 64 queues */
 };
 
 #pragma GCC diagnostic push
@@ -101,8 +101,8 @@ static __always_inline int next_action(struct flow_metadata *fm)
         return -1;
     }
 
-	struct act_cursor *cur = (struct act_cursor *)actions->data;
-	fm->offset += cur->len;
+    struct act_cursor *cur = (struct act_cursor *)actions->data;
+    fm->offset += cur->len;
     fm->pos += 1;
     return cur->type;
 }
