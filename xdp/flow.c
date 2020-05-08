@@ -9,7 +9,7 @@ void ovs_flow_stats_update(struct xdp_flow *flow, __be16 tcp_flags,
     /* TODO: implement method */
 }
 
-void ovs_flow_stats_get(const struct xdp_flow *flow, struct ovs_flow_stats *stats,
+void ovs_flow_stats_get(const struct xdp_flow *flow, struct xdp_flow_stats *stats,
             unsigned long *used, __be16 *tcp_flags)
 {
     /* TODO: implement method */

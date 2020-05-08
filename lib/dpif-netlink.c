@@ -1360,6 +1360,16 @@ dpif_netlink_init_flow_put(struct dpif_netlink *dpif,
 {
     static const struct nlattr dummy_action;
 
+     /* Print for debug */
+    struct ds ds = DS_EMPTY_INITIALIZER;
+
+    /* XXX: Use dpif_format_flow()? */
+    odp_flow_format(put->key, put->key_len, put->mask, put->mask_len, NULL, &ds, true);
+    ds_put_cstr(&ds, ", actions=");
+    format_odp_actions(&ds, put->actions, put->actions_len, NULL);
+    VLOG_INFO("Func %s Translating odp key to netlink key:\n%s", __func__, ds_cstr(&ds));
+    ds_destroy(&ds);
+
     dpif_netlink_flow_init(request);
     request->cmd = (put->flags & DPIF_FP_CREATE
                     ? OVS_FLOW_CMD_NEW : OVS_FLOW_CMD_SET);
@@ -1796,6 +1806,15 @@ dpif_netlink_encode_execute(int dp_ifindex, const struct dpif_execute *d_exec,
     struct ovs_header *k_exec;
     size_t key_ofs;
 
+    struct ds ds = DS_EMPTY_INITIALIZER;
+
+    /* XXX: Use dpif_format_flow()? */
+    flow_format(&ds, d_exec->flow, NULL);
+    ds_put_cstr(&ds, ", actions=");
+    format_odp_actions(&ds,d_exec->actions,d_exec->actions_len, NULL);
+    VLOG_INFO("Func %s Flow:\n%s", __func__, ds_cstr(&ds));
+    ds_destroy(&ds);
+
     ofpbuf_prealloc_tailroom(buf, (64
                                    + dp_packet_size(d_exec->packet)
                                    + ODP_KEY_METADATA_SIZE
@@ -1947,6 +1966,7 @@ dpif_netlink_operate__(struct dpif_netlink *dpif,
                         dpif_netlink_flow_get_stats(&reply, put->stats);
                     }
                 }
+                VLOG_INFO("---- Ended: %s dpif_netlink_flow_put, error: %d  ----", __func__, op->error);
             }
             break;
 
@@ -2225,6 +2245,7 @@ static void
 dpif_netlink_operate(struct dpif *dpif_, struct dpif_op **ops, size_t n_ops,
                      enum dpif_offload_type offload_type)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     struct dpif_op *new_ops[OPERATE_MAX_OPS];
     int count = 0;
@@ -2661,6 +2682,7 @@ dpif_netlink_recv__(struct dpif_netlink *dpif, uint32_t handler_id,
     int read_tries = 0;
 
     if (!dpif->handlers || handler_id >= dpif->n_handlers) {
+        VLOG_INFO("-- EAGAIN --");
         return EAGAIN;
     }
 
@@ -2694,6 +2716,7 @@ dpif_netlink_recv__(struct dpif_netlink *dpif, uint32_t handler_id,
             int error;
 
             if (++read_tries > 50) {
+                VLOG_INFO("-- EAGAIN 2 --");
                 return EAGAIN;
             }
 
@@ -2710,12 +2733,20 @@ dpif_netlink_recv__(struct dpif_netlink *dpif, uint32_t handler_id,
             ch->last_poll = time_msec();
             if (error) {
                 if (error == EAGAIN) {
+                    VLOG_INFO("-- EAGAIN 3 --");
                     break;
                 }
                 return error;
             }
 
             error = parse_odp_packet(buf, upcall, &dp_ifindex);
+             /* Print for debug */
+            struct ds ds = DS_EMPTY_INITIALIZER;
+
+            /* XXX: Use dpif_format_flow()? */
+            odp_flow_format(upcall->key, upcall->key_len, NULL, 0, NULL, &ds, true);
+            VLOG_INFO("Func %s Translating odp key to netlink key:\n%s", __func__, ds_cstr(&ds));
+            ds_destroy(&ds);
             if (!error && dp_ifindex == dpif->dp_ifindex) {
                 return 0;
             } else if (error) {
@@ -2732,7 +2763,7 @@ static int
 dpif_netlink_recv(struct dpif *dpif_, uint32_t handler_id,
                   struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     int error;
 
@@ -2743,7 +2774,7 @@ dpif_netlink_recv(struct dpif *dpif_, uint32_t handler_id,
     error = dpif_netlink_recv__(dpif, handler_id, upcall, buf);
 #endif
     fat_rwlock_unlock(&dpif->upcall_lock);
-
+    VLOG_INFO("---- Edded: %s ----", __func__);
     return error;
 }
 
@@ -2751,6 +2782,7 @@ static void
 dpif_netlink_recv_wait__(struct dpif_netlink *dpif, uint32_t handler_id)
     OVS_REQ_RDLOCK(dpif->upcall_lock)
 {
+    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
 #ifdef _WIN32
     uint32_t i;
     struct dpif_windows_vport_sock *sock_pool =
@@ -2771,16 +2803,19 @@ dpif_netlink_recv_wait__(struct dpif_netlink *dpif, uint32_t handler_id)
         poll_fd_wait(handler->epoll_fd, POLLIN);
     }
 #endif
+    VLOG_INFO("---- Edded: %s ----", __func__);
 }
 
 static void
 dpif_netlink_recv_wait(struct dpif *dpif_, uint32_t handler_id)
 {
+    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
 
     fat_rwlock_rdlock(&dpif->upcall_lock);
     dpif_netlink_recv_wait__(dpif, handler_id);
     fat_rwlock_unlock(&dpif->upcall_lock);
+    VLOG_INFO("---- Edded: %s ----", __func__);
 }
 
 static void

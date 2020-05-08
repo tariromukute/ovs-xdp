@@ -4,19 +4,8 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
-int ovs_flow_init()
-{
-    /* TODO: implement method */
-    return 0;
-}
 
-void ovs_flow_exit()
-{
-    /* TODO: implement method */
-}
-
-
-struct xdp_flow *ovs_flow_alloc()
+struct xdp_flow *xdp_flow_alloc()
 {
     struct xdp_flow *flow = NULL;
     /* TODO: implement method */
@@ -24,54 +13,45 @@ struct xdp_flow *ovs_flow_alloc()
     return flow;
 }
 
-void ovs_flow_free(struct xdp_flow *flow, bool deferred)
-{
-    /* TODO: implement method */
-}
-
-
-int ovs_flow_tbl_init()
+int xdp_flow_map_count(int map_fd)
 {
     /* TODO: implement method */
     return 0;
 }
 
-int ovs_flow_tbl_count()
-{
-    /* TODO: implement method */
-    return 0;
-}
-
-void ovs_flow_tbl_destroy()
-{
-    /* TODO: implement method */
-}
-
-int ovs_flow_tbl_flush()
+int xdp_flow_map_flush(int map_fd)
 {
     /* TODO: implement method */
     return 0;
 }
 
 
-int ovs_flow_tbl_insert(struct xdp_flow *flow)
+int xdp_flow_map_insert(int map_fd, struct xdp_flow *flow)
 {
     /* TODO: implement method */
     return 0;
 }
 
-void ovs_flow_tbl_remove(struct xdp_flow *flow)
-{
-    /* TODO: implement method */
-}
-
-int  ovs_flow_tbl_num_masks()
+int xdp_flow_map_remove(int map_fd, struct xdp_flow_key *key)
 {
     /* TODO: implement method */
     return 0;
 }
 
-struct xdp_flow *ovs_flow_tbl_lookup(const struct xdp_flow_key *key)
+int xdp_flow_map_num_masks(int map_fd)
+{
+    /* TODO: implement method */
+    return 0;
+}
+
+int xdp_flow_map_next_key(int map_fd, struct xdp_flow_key *ckey, struct xdp_flow_key *nkey)
+{
+    nkey = NULL;
+
+    return 0;
+}
+
+struct xdp_flow *xdp_flow_map_lookup(int map_fd, const struct xdp_flow_key *key)
 {
     struct xdp_flow *flow = NULL;
     /* TODO: implement method */
@@ -79,7 +59,7 @@ struct xdp_flow *ovs_flow_tbl_lookup(const struct xdp_flow_key *key)
     return flow;
 }
 
-struct xdp_flow *ovs_flow_tbl_lookup_ufid(const struct xdp_flow_id *id)
+struct xdp_flow *xdp_flow_map_lookup_ufid(int map_fd, const struct xdp_flow_id *id)
 {
     struct xdp_flow *flow = NULL;
     /* TODO: implement method */

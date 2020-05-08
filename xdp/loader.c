@@ -10,6 +10,7 @@
 #include <sys/resource.h>
 #include "flow.h"
 #include "loader.h"
+#include "datapath.h"
 
 VLOG_DEFINE_THIS_MODULE(xdp_loader);
 struct config {
@@ -32,10 +33,14 @@ struct config {
     bool xsk_poll_mode;
 };
 
-static const char *default_filename = "xdp_prog_kern.o";
+static const char *default_filename = "entry-point.o";
 static const char *action_filename = "actions.o";
 static const char *pin_basedir = "/sys/fs/bpf";
 static const char *prog_map_name = "tail_table";
+static const char *stats_map = "stats_map";
+static const char *flow_map = "flow_table";
+// static const char *devmap = "devmap";
+// static const char *xsks_map = "xsks_map";
 static const char *prog_name = "process";
 
 
@@ -137,8 +142,9 @@ error_exit:
     return NULL;
 }
 
-int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname)
+int xsk_sock_create(struct xsk_socket_info **sockp, const char *ifname)
 {
+    struct xsk_socket_info *sock;
     void *packet_buffer;
     uint64_t packet_buffer_size;
     struct config cfg = {
@@ -151,8 +157,7 @@ int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname)
     cfg.ifindex = if_nametoindex(cfg.ifname);
     struct rlimit rlim = {RLIM_INFINITY, RLIM_INFINITY};
     struct xsk_umem_info *umem;
-
-    /* Allow unlimited locking of memory, so all memory needed for packet
+    VLOG_INFO("---- Called: %s 1----", __func__);/* Allow unlimited locking of memory, so all memory needed for packet
     * buffers can be locked.
     */
     if (setrlimit(RLIMIT_MEMLOCK, &rlim)) {
@@ -176,12 +181,13 @@ int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname)
     }
 
     /* Open and configure the AF_XDP (xsk) socket */
-    *sock = xsk_configure_socket(&cfg, umem);
+    sock = xsk_configure_socket(&cfg, umem);
     if (sock == NULL) {
         VLOG_INFO("ERROR: Can't setup AF_XDP socket");
         return EXIT_FAIL;
     }
 
+    *sockp = sock;
     return 0;
 }
 
@@ -279,7 +285,6 @@ static int reuse_maps(struct bpf_object *obj, struct config *cfg)
         pinned_map_fd = bpf_obj_get(buf);
         if (pinned_map_fd > 0) // if reuse already pinned maps
         {
-            VLOG_INFO("Reusing map: %s", bpf_map__name(map));
             err = bpf_map__reuse_fd(map, pinned_map_fd);
             if (err)
             {
@@ -325,12 +330,10 @@ static int pin_unpinned_maps(struct bpf_object *obj, struct config *cfg)
         pinned_map_fd = bpf_obj_get(buf);
         if (pinned_map_fd < 0)
         {
-            VLOG_INFO("The map %s is not pinned \n", bpf_map__name(map));
             err = bpf_map__pin(map, buf);
             if (err)
             {
                 VLOG_INFO("Error pinning map %s \n", bpf_map__name(map));
-                // goto out;
             }
         }
     }
@@ -467,7 +470,7 @@ static int load_update_prog_map(const char *filename, struct config *cfg)
     {
         char buf[PATH_MAX];
 
-        len = snprintf(buf, PATH_MAX, "%s/%s/%s", cfg->pin_dir, "prog", ovs_action_attr_list[i].name);
+        len = snprintf(buf, PATH_MAX, "%s/%s/%s", cfg->pin_dir, "prog", xdp_action_attr_list[i].name);
         if (len < 0)
         {
             return -EINVAL;
@@ -477,19 +480,44 @@ static int load_update_prog_map(const char *filename, struct config *cfg)
             return -ENAMETOOLONG;
         }
 
-        VLOG_INFO("name of program is: %s at position %d\n", buf, i);
         prog_fd = bpf_obj_get(buf);
-        VLOG_INFO("Prog FD: %d\n", prog_fd);
         err = bpf_map_update_elem(map_fd, &i, &prog_fd, 0);
         if (err) {
-            VLOG_INFO("Could not update prog map\n");
+            // VLOG_INFO("Could not update prog map\n");
         }
     }
 
     return 0;
 }
 
-int xdp_load(const char *ifname)
+static int pinned_map_by_name(struct config *cfg, const char *name)
+{
+    char buf[PATH_MAX];
+    char pin_dir[PATH_MAX];
+
+    if (name[0] == '_') { // global map
+        strcpy(pin_dir, pin_basedir);
+    } else { // interface/entry point map
+        strcpy(pin_dir, cfg->pin_dir);
+    }
+
+    // check if map already pinned
+    int len = snprintf(buf, PATH_MAX, "%s/%s", pin_dir, name);
+    if (len < 0)
+    {
+        return -EINVAL;
+    }
+    else if (len >= PATH_MAX)
+    {
+        return -ENAMETOOLONG;
+    }
+
+    int fd = bpf_obj_get(buf);
+
+    return fd;
+}
+
+int xdp_load(struct xdp_ep *xdp_ep, const char *path, const char *ifname)
 {
     int err;
     struct config cfg = {
@@ -510,14 +538,34 @@ int xdp_load(const char *ifname)
         return EXIT_FAIL_OPTION;
     }
 
-    err = load_attach_program(default_filename, &cfg);
+    char ep[PATH_MAX];
+    len = snprintf(ep, PATH_MAX, "%s/%s", path, default_filename);
+    if (len < 0) {
+        VLOG_INFO("ERR: creating entry point path\n");
+        return EXIT_FAIL_OPTION;
+    }
+
+    err = load_attach_program(ep, &cfg);
     if (err) {
         VLOG_INFO("error loading program\n");
     }
-    err = load_update_prog_map(action_filename, &cfg);
+
+    char actions[PATH_MAX];
+    len = snprintf(actions, PATH_MAX, "%s/%s", path, action_filename);
+    if (len < 0) {
+        VLOG_INFO("ERR: creating actions path\n");
+        return EXIT_FAIL_OPTION;
+    }
+
+    err = load_update_prog_map(actions, &cfg);
     if (err) {
         VLOG_INFO("error adding programs to prog map\n");
+        return EXIT_FAIL_OPTION;
     }
+
+    xdp_ep->flow_map_fd = pinned_map_by_name(&cfg, flow_map);
+    xdp_ep->stats_map_fd = pinned_map_by_name(&cfg, stats_map);
+    xdp_ep->ep_id = xdp_ep->flow_map_fd;
 
     return 0; 
 

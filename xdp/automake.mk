@@ -222,7 +222,7 @@ $(info "================ RUNNING =======================")
 # 	xdp/loader.c \
 # 	xdp/loader.h
 
-lib_LTLIBRARIES = xdp/libxdp.la
+lib_LTLIBRARIES += xdp/libxdp.la
 xdp_libxdp_la_SOURCES =
 
 xdp_libxdp_la_LIBADD = \
@@ -287,7 +287,9 @@ EXTRA_DIST += \
 	xdp/tail_actions.h \
 	$(XDP_C)
 
-
+dist_xdp_DATA += \
+	xdp/actions.o \
+	xdp/entry-point.o
 
 CLEANFILES += \
 	xdp/actions.ll \

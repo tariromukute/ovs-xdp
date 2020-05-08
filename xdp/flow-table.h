@@ -4,12 +4,11 @@
  * are CPU 
  */
 
-#ifndef FLOW_TABLE_H
-#define FLOW_TABLE_H 1
+#ifndef FLOW_MAP_H
+#define FLOW_MAP_H 1
 
 #include <linux/bpf.h>
 #include <stdbool.h>
-#include <bpf/bpf_helpers.h>
 #include "flow.h"
 
 struct flow_table {
@@ -25,22 +24,17 @@ struct flow_table {
 // 	.max_entries = 100,
 // };
 
-int ovs_flow_init(void);
-void ovs_flow_exit(void);
+struct xdp_flow *xdp_flow_alloc(void);
 
-struct xdp_flow *ovs_flow_alloc(void);
-void ovs_flow_free(struct xdp_flow *, bool deferred);
+int xdp_flow_map_count(int map_fd);
+int xdp_flow_map_flush(int map_fd);
 
-int ovs_flow_tbl_init(void);
-int ovs_flow_tbl_count(void);
-void ovs_flow_tbl_destroy(void);
-int ovs_flow_tbl_flush(void);
-
-int ovs_flow_tbl_insert(struct xdp_flow *flow);
-void ovs_flow_tbl_remove(struct xdp_flow *flow);
-int  ovs_flow_tbl_num_masks(void);
-struct xdp_flow *ovs_flow_tbl_lookup(const struct xdp_flow_key *);
-struct xdp_flow *ovs_flow_tbl_lookup_ufid(const struct xdp_flow_id *);
+int xdp_flow_map_insert(int map_fd, struct xdp_flow *flow);
+int xdp_flow_map_remove(int map_fd, struct xdp_flow_key *key);
+int xdp_flow_map_num_masks(int map_fd);
+int xdp_flow_map_next_key(int map_fd, struct xdp_flow_key *, struct xdp_flow_key *);
+struct xdp_flow *xdp_flow_map_lookup(int map_fd, const struct xdp_flow_key *);
+struct xdp_flow *xdp_flow_map_lookup_ufid(int map_fd, const struct xdp_flow_id *);
 
 
-#endif /* flow_table.h */                     
+#endif /* flow_map.h */                     

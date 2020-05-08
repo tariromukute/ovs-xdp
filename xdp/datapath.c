@@ -1,32 +1,164 @@
 #include "datapath.h"
+#include "flow-table.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
-void ovs_dp_process_packet(struct xdp_md *ctx, struct xdp_flow_key *key)
+int xdp_dp_downcall(struct datapath *dp, const struct xdp_flow_key *key,
+            const struct dp_downcall_info *info)
 {
-    /* TODO: implement method */
+    int err = 0;
+
+    return err;
 }
 
-int ovs_dp_upcall(struct datapath *dp, struct xdp_md *ctx,
-          const struct xdp_flow_key *key, const struct dp_upcall_info *info,
-          __u32 cutlen)
+const char *xdp_dp_name(const struct datapath *dp)
 {
-    /* TODO: implement method */
-    return 0;
+    return "";
 }
 
-const char* ovs_dp_name(const struct datapath *dp)
+/* datapath crud */
+int xdp_dp_create(struct datapath *dp)
 {
-    char *name = "";
-    /* TODO: implement method */
-    return name;
+    int err = 0;
+
+    return err;
 }
 
-int ovs_execute_actions(struct datapath *dp, struct xdp_md *ctx,
-            const struct xdp_flow_actions *act, struct xdp_flow_key *key)
+int xdp_dp_update(struct datapath *dp)
 {
-    /* TODO: implement method */
-    return 0;
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_delete(struct datapath *dp)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_fetch(struct datapath *dp)
+{
+    int err = 0;
+
+    return err;
+}
+
+/* datapath port actions */
+int xdp_dp_port_add(struct datapath *dp, struct xport *xport)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_port_del(struct datapath *dp, struct xport *xport)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_port_lookup(struct datapath *dp, struct xport *xport)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_port_next(struct datapath *dp, struct xport *xport)
+{
+    int err = 0;
+
+    return err;
+}
+
+/* entry point flows */
+int xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow)
+{
+    int err = 0;
+
+    flow = xdp_flow_map_lookup(map_fd, key);
+
+    return err;
+}
+
+int xdp_ep_flow_insert(int map_fd, struct xdp_flow *flow)
+{
+    int err = 0;
+
+    err = xdp_flow_map_insert(map_fd, flow);
+
+    return err;
+}
+
+/* TODO: think need pointer to a pointer here for key */
+int xdp_ep_flow_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow)
+{
+    int err = 0;
+
+    struct xdp_flow_key nkey;
+
+    err = xdp_flow_map_next_key(map_fd, key, &nkey);
+
+    key = &nkey;
+
+    return err;
+}
+
+int xdp_ep_flow_remove(int map_fd, struct xdp_flow_key *key)
+{
+    int err = 0;
+
+    err = xdp_flow_map_remove(map_fd, key);
+
+    return err;
+}
+
+int xdp_ep_flow_flush(int map_fd)
+{
+    int err = 0;
+
+    err = xdp_flow_map_flush(map_fd);
+
+    return err;
+}
+
+/* datapath flows */
+int xdp_dp_flow_lookup(struct datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_flow_insert(struct datapath *dp, struct xdp_flow *flow)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_flow_next(struct datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_flow_remove(struct datapath *dp, struct xdp_flow_key *key)
+{
+    int err = 0;
+
+    return err;
+}
+
+int xdp_dp_flow_flush(struct datapath *dp, struct xdp_flow_key *key)
+{
+    int err = 0;
+
+    return err;
 }
 #pragma GCC diagnostic pop
 

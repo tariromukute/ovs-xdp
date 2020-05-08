@@ -7,6 +7,7 @@
 #include <linux/bpf.h>
 #include <bpf/bpf.h>
 #include <bpf/xsk.h>
+#include "datapath.h"
 // #include <linux/if_link.h>
 
 #include "openvswitch/vlog.h"
@@ -75,10 +76,10 @@ struct xsk_socket_info {
 
 int link_detach(int ifindex, __u32 xdp_flags, __u32 expected_prog_id);
 int link_attach(int ifindex, __u32 xdp_flags, int prog_fd);
-int xsk_sock_create(struct xsk_socket_info **sock, const char *ifname);
+int xsk_sock_create(struct xsk_socket_info **sockp, const char *ifname);
 int xsk_sock_close(struct xsk_socket_info *sock);
 void xsk_sock_destroy(struct xsk_socket_info *sock);
-int xdp_load(const char *ifname);
+int xdp_load(struct xdp_ep *xdp_ep, const char *path, const char *ifname);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"

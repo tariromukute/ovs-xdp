@@ -2,21 +2,11 @@
 #define TAIL_ACTION_H 1
 
 #include <linux/bpf.h>
-#include <linux/openvswitch.h>
-#include <linux/in.h>
-#include <linux/if_ether.h>
-#include <linux/if_packet.h>
-#include <linux/ipv6.h>
-#include <linux/icmpv6.h>
-#include <linux/mpls.h>
-#include <crypt.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <net/if_arp.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-#include "nsh.h"
 #include "flow.h"
 
 #include "parsing_helpers.h"
@@ -128,7 +118,7 @@ static __always_inline void tail_action(struct xdp_md *ctx)
         bpf_printk("flow_metadata after next_action pos %x\n", fm->pos);
         bpf_printk("flow_metadata after next_action offset %x\n", fm->offset);
         bpf_printk("flow_action is: %d\n", flow_action);
-        if (flow_action > 0 && flow_action < OVS_ACTION_ATTR_MAX) {
+        if (flow_action > 0 && flow_action <= XDP_ACTION_ATTR_MAX) {
             bpf_tail_call(ctx, &tail_table, flow_action);
         }    
 

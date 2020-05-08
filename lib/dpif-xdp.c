@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <poll.h>
 #include <net/if.h>
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -14,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/epoll.h>
 #include <unistd.h>
 #include <linux/bpf.h>
 #include <bpf/xsk.h>
@@ -68,6 +70,8 @@
 #include "hash.h"
 #include "uuid.h"
 #include "loader.h"
+#include "dirs.h"
+#include "datapath.h"
 
 /* ================================================================
     The xdp uses more or less the same datapath as netdev, only
@@ -97,9 +101,10 @@ struct dp_channel {
 };
 
 struct dp_handler {
-    struct pollfd fds[MAX_SOCKS]; /* fds for poll. reset everytime before use. also used for wakeup if needed */
-    int event_offset;             /* Offset into fds[i]->events. */
-
+    struct epoll_event *epoll_events;
+    int epoll_fd;                 /* epoll fd that includes channel socks. */
+    int n_events;                 /* Num events returned by epoll_wait(). */
+    int event_offset;             /* Offset into 'epoll_events'. */             
 };
 
 struct dp_xdp {
@@ -126,7 +131,6 @@ struct dp_xdp {
     struct fat_rwlock upcall_lock;
     uint32_t n_handlers;            /* Num of upcall handlers. */
     struct dp_handler *handlers;   /* Array of handlers */
-    int uc_array_size;             /* Size of 'handler->channels' */
 
     /* Upcall channels. */
     int n_channels;
@@ -140,6 +144,8 @@ struct dp_xdp {
 struct dp_xdp_port {
     odp_port_t port_no;
     int ifindex;
+    int ep_id; /* Id for the ep, using the flow_map_fd as id may change in future */
+    struct hmap_node epnode;    /* Node in dp_xdp_entry_point */
     const char *name;
     bool dynamic_txqs;          /* If true XPS will be used. */
     bool need_reconfigure;      /* True if we should reconfigure netdev. */
@@ -201,7 +207,8 @@ struct dpif_xdp {
  */
 struct dp_xdp_entry_point {
     struct dp_xdp *dp;
-    odp_port_t port_no; // to identify the network device
+    int ep_id; 
+    struct hmap ports; // list of port_no with this entry_point
     struct ovs_refcount ref_cnt;    /* Every reference must be refcount'ed. */
 
     struct cmap_node node; // reference to the node in dp->entry_points
@@ -209,14 +216,14 @@ struct dp_xdp_entry_point {
     // TODO: check the tyoe of mode, likely not char
     char *mode; /* Native, Generic, Offloaded */
 
-    struct bpf_object *prog; /* The loaded xdp program */
+    int prog_fd; /* The loaded xdp program */
 
-    struct bpf_map_info devmap; /* map with destination interfaces for batch flushing */
+    int devmap_fd; /* map with destination interfaces for batch flushing */
 
     // struct ovs_mutex flow_mutex; /* TODO: check if mutex for flow_table_cache is needed and init it in relevant methods. */
-    struct bpf_map_info flow_table; /* Flow table, shared map. TODO: if possible make it readonly reference */
-    struct bpf_map_info flow_table_cache; /* Cache of flow table, for individual interface */
-    struct bpf_map_info stats; /* Keeps track of the entry point's performance */
+    int flow_map_fd; /* Flow table, shared map. TODO: if possible make it readonly reference */
+    int stats_map_fd; /* table for stats on the performance of the ep */
+    struct xdp_ep_stats stats; /* Keeps track of the entry point's performance */
 
 };
 
@@ -225,27 +232,14 @@ struct dpif_xdp_port_state {
     char *name;
 };
 
-struct dp_xdp_flow {
-    /* TODO: define the flow attributes */
-};
-
 struct dpif_xdp_flow_dump {
     struct dpif_flow_dump up;
     struct cmap_position entry_point_pos;
-    int flow_pos; /* TODO: define the type for a bpf_map position when looping */
+    struct xdp_flow_key flow_pos; /* TODO: define the type for a bpf_map position when looping */
     struct dp_xdp_entry_point *cur_ep;
     int status;
     struct ovs_mutex mutex; /* TODO: *verify if needed */
     // struct dpif_flow_dump_types types; /* TODO: check if we need it */
-};
-
-/* TODO: need to define the relavant struct */
-/* Must be public as it is instantiated in subtable struct below. */
-struct xdp_flow_key {
-    uint32_t hash;       /* Hash function differs for different users. */
-    uint32_t len;        /* Length of the following miniflow (incl. map). */
-    struct miniflow mf;
-    uint64_t buf[FLOW_MAX_PACKET_U64S];
 };
 
 struct dp_xdp_actions {
@@ -270,18 +264,9 @@ struct dpif_xdp_flow_dump_thread {
     struct odputil_keybuf actbuf[FLOW_DUMP_MAX_BATCH];
 };
 
-struct xdp_upcall {
-    __u8 type;
-    __u8 subtype;
-    __u32 ifindex;
-    __u32 pkt_len;
-    struct xdp_flow_key key;  
-    /* Follwed by pkt_len of packet data */
-};
-
 struct ovs_xsk_event {
     struct xdp_upcall header;
-    uint8_t *data;
+    uint8_t data[];
 };
 
 static struct odp_support dp_xdp_support = {
@@ -337,8 +322,6 @@ static int do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
 static bool port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
                uint32_t *upcall_pids);
 static int dpif_xdp_port_dump_start__(struct dp_xdp *dp, struct dpif_xdp_port_state *state);
-static int create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp, const char *name)
-    OVS_REQ_WRLOCK(dp->upcall_lock);
 static void destroy_all_channels(struct dp_xdp *dp)
     OVS_REQ_WRLOCK(dp->upcall_lock);
 static int dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
@@ -349,7 +332,6 @@ static void dp_xdp_unref(struct dp_xdp *dp);
 static struct dpif * create_dpif_xdp(struct dp_xdp *dp);
 static int dp_xdp_handler_init(struct dp_handler *handler);
 static void dp_xdp_handler_uninit(struct dp_handler *handler);
-static int dp_xdp_channels_create(struct dp_xdp *dp);
 static int create_dp_xdp(const char *name, const struct dpif_class *class,
                  struct dp_xdp **dpp)
     OVS_REQUIRES(dp_xdp_mutex);
@@ -360,31 +342,37 @@ static int dpif_xdp_mask_from_nlattrs(const struct nlattr *key, uint32_t key_len
                               uint32_t mask_key_len, const struct flow *flow,
                               struct flow_wildcards *wc, bool probe);
 static void dp_xdp_ep_remove_flow(struct dp_xdp_entry_point *ep,
-                      struct dp_xdp_flow *flow);
+                      struct xdp_flow *flow);
 static void dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep);
-static struct dp_xdp_flow * dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
-                          const struct xdp_flow_key *key,
+static struct xdp_flow * dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
+                          struct xdp_flow_key *key,
                           int *lookup_num_p);
-static struct dp_xdp_flow * dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
+static struct xdp_flow * dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
                         const ovs_u128 *ufidp, const struct nlattr *key,
                         size_t key_len);
+static struct xdp_flow * dp_xdp_ep_next_flow(const struct dp_xdp_entry_point *ep,
+                        struct xdp_flow_key *key);
 static struct dpif_xdp_flow_dump * dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump);
 static struct dpif_xdp_flow_dump_thread * dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread);
-static int dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
-                        odp_port_t port_no, const char *devname);
+static int dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
+                        struct dp_xdp_port *port, const char *devname);
 static void dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep);
 static bool dp_xdp_ep_try_ref(struct dp_xdp_entry_point *ep);
 static void dp_xdp_ep_unref(struct dp_xdp_entry_point *ep);
 static void dp_xdp_actions_free(struct dp_xdp_actions *actions);
 struct dp_xdp_actions * dp_xdp_actions_create(const struct nlattr *actions, size_t size);
-struct dp_xdp_actions * dp_xdp_flow_get_actions(const struct dp_xdp_flow *flow);
-static struct dp_xdp_entry_point * dp_xdp_get_ep(struct dp_xdp *dp, odp_port_t port_no);
+struct dp_xdp_actions * dp_xdp_flow_get_actions(const struct xdp_flow *flow);
+static struct dp_xdp_entry_point * dp_xdp_get_ep(struct dp_xdp *dp, int ep_id);
 static struct dp_xdp_entry_point * dp_xdp_ep_get_next(struct dp_xdp *dp, struct cmap_position *pos);
 static void dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp,
-                            const struct dp_xdp_flow *xdp_flow,
+                            const struct xdp_flow *xdp_flow,
+                            struct ofpbuf *key_buf, struct ofpbuf *mask_buf, struct ofpbuf *act_buf,
+                            struct dpif_flow *flow, bool terse);
+static void dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp,
+                            const struct xdp_flow *xdp_flow,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
                             struct dpif_flow *flow, bool terse);
-static void dpif_xdp_flow_get_stats(const struct dp_xdp_flow *flow,
+static void dpif_xdp_flow_get_stats(const struct xdp_flow *flow,
                             struct dpif_flow_stats *stats);
 static int flow_put_on_ep(struct dp_xdp_entry_point *ep,
                 struct xdp_flow_key *key,
@@ -409,11 +397,10 @@ get_port_by_name(struct dp_xdp *dp,
                  const char *devname, struct dp_xdp_port **portp)
     OVS_REQUIRES(dp->port_mutex)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp_port *port; // IMPORTANT: port type not common
 
     HMAP_FOR_EACH (port, node, &dp->ports) {
-        VLOG_INFO("--- netdev name: %s, devname: %s", netdev_get_name(port->netdev), devname);
         if (!strcmp(netdev_get_name(port->netdev), devname)) {
             *portp = port;
             return 0;
@@ -435,7 +422,6 @@ get_port_by_ifindex(struct dp_xdp *dp,
     struct dp_xdp_port *port; // IMPORTANT: port type not common
 
     HMAP_FOR_EACH (port, node, &dp->ports) {
-        VLOG_INFO("--- netdev name: %s, ifindex: %d", netdev_get_name(port->netdev), netdev_get_ifindex(port->netdev));
         if (netdev_get_ifindex(port->netdev) == ifindex) {
             *portp = port;
             return 0;
@@ -453,7 +439,7 @@ static void
 answer_port_query(const struct dp_xdp_port *port,
                   struct dpif_port *dpif_port)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     dpif_port->name = xstrdup(netdev_get_name(port->netdev));
     dpif_port->type = xstrdup(port->type);
     dpif_port->port_no = port->port_no;
@@ -462,7 +448,6 @@ answer_port_query(const struct dp_xdp_port *port,
 static uint32_t
 hash_port_no(odp_port_t port_no)
 {
-    VLOG_INFO("---- Called: %s, port_no: %d ----", __func__, odp_to_u32(port_no));
     return hash_int(odp_to_u32(port_no), 0);
 }
 
@@ -523,7 +508,7 @@ dpif_xdp_cast(const struct dpif *dpif)
 static struct dp_xdp *
 get_dp_xdp(const struct dpif *dpif)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     return dpif_xdp_cast(dpif)->dp;
 }
 
@@ -558,9 +543,10 @@ do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
     struct dp_xdp_entry_point *ep;
 
     /* Remove ep */
-    ep = dp_xdp_get_ep(dp, port->port_no);
-    dp_xdp_destroy_ep(ep);
+    ep = dp_xdp_get_ep(dp, port->ep_id);
     
+    hmap_remove(&ep->ports, &port->epnode);
+
     hmap_remove(&dp->ports,&port->node);
     seq_change(dp->port_seq);
 
@@ -652,6 +638,7 @@ port_create(const char *devname, const char *type,
     port->emc_enabled = true;
     port->need_reconfigure = true;
     port->n_upcall_pids = 1;
+    port->upcall_pids = xzalloc(sizeof *port->upcall_pids);
     ovs_mutex_init(&port->txq_used_mutex);
 
     *portp = port;
@@ -670,14 +657,12 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
             odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s, port name: %s ----", __func__, devname);
     struct dp_xdp_port *port;
     struct dp_xdp_entry_point *ep;
     struct xsk_socket_info *sock = NULL;
-    // uint32_t upcall_pids = 0;
+    
     int error = 0;
-
-    ep = xzalloc(sizeof *ep);
     
     if (!get_port_by_name(dp, devname, &port)) {
         return EEXIST;
@@ -690,29 +675,30 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
 
     hmap_insert(&dp->ports, &port->node, hash_port_no(port_no));
     seq_change(dp->port_seq);
-    VLOG_INFO("after hash_port_no");
+
     // configure ep
+    /* NOTE: Seems like if we try to attached the xdp program to ovs-xdp the code will break.
+     * Didn't investgate the cause just put an if statement that will stop the creation of an
+     * entry point for ovs-xdp */
     if (strcmp(devname, "ovs-xdp") != 0) {
-        VLOG_INFO("before dp_xdp_configure_ep");
-        error = dp_xdp_configure_ep(ep, dp, port_no, devname);
-        VLOG_INFO("after dp_xdp_configure_ep");
+        error = dp_xdp_configure_ep(&ep, dp, port, devname);
     } else {
         goto out;
     }
-    VLOG_INFO("after strcmp");
     if (error) {
         goto out;
     }
 
     // add socket for upcall
     fat_rwlock_wrlock(&dp->upcall_lock);
-    error = create_xsk_sock(dp, sock, devname);
+    error = xsk_sock_create(&sock, devname);
     fat_rwlock_unlock(&dp->upcall_lock);
     if (error) {
-        VLOG_INFO("failed to create upcall socket");
         goto out;
     }
-    port->upcall_pids[0] = xsk_socket__fd(sock->xsk);
+    int fd = xsk_socket__fd(sock->xsk);
+
+    port->upcall_pids[0] = fd;
 
     error = port_add_channel(dp, port_no, sock);
 
@@ -720,7 +706,6 @@ out:
     if (error) {
         do_del_port(dp, port);
     }
-
     return error;
 }
 
@@ -774,21 +759,16 @@ port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
     return true;
 }
 
-static int
-create_xsk_sock(struct dp_xdp *dp, struct xsk_socket_info *sockp, const char *name)
-    OVS_REQ_WRLOCK(dp->upcall_lock)
-{
-    VLOG_INFO("---- Called: %s ----", __func__);
-    return xsk_sock_create(&sockp, name);
-}
 
 static int
 port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
                   struct xsk_socket_info *sock)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
+    struct epoll_event event;
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
+    int error;
 
     if (dp->handlers == NULL) {
         xsk_sock_close(sock);
@@ -798,7 +778,7 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
     /* We assume that the datapath densely chooses port numbers, which can
      * therefore be used as an index into 'channels' and 'epoll_events' of
      * 'dpif'. */
-    if (port_idx >= dp->uc_array_size) {
+    if (port_idx >= dp->n_channels) {
         uint32_t new_size = port_idx + 1;
 
         if (new_size > MAX_SOCKS) {
@@ -810,17 +790,47 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
         dp->channels = xrealloc(dp->channels,
                                   new_size * sizeof *dp->channels);
 
-        for (i = dp->uc_array_size; i < new_size; i++) {
+        for (i = dp->n_channels; i < new_size; i++) {
             dp->channels[i].sock = NULL;
         }
 
-        dp->uc_array_size = new_size;
+        for (i = 0; i < dp->n_handlers; i++) {
+            struct dp_handler *handler = &dp->handlers[i];
+
+            handler->epoll_events = xrealloc(handler->epoll_events,
+                new_size * sizeof *handler->epoll_events);
+
+        }
+
+        dp->n_channels = new_size;
+    }
+
+    memset(&event, 0, sizeof event);
+    event.events = EPOLLIN | EPOLLEXCLUSIVE;
+    event.data.u32 = port_idx;
+
+    for (i = 0; i < dp->n_handlers; i++) {
+        struct dp_handler *handler = &dp->handlers[i];
+        if (epoll_ctl(handler->epoll_fd, EPOLL_CTL_ADD, xsk_socket__fd(sock->xsk),
+                      &event) < 0) {
+            error = errno;
+            goto error;
+        }
     }
 
     dp->channels[port_idx].sock = sock;
     dp->channels[port_idx].last_poll = LLONG_MIN;
 
     return 0;
+
+error:
+    while (i--) {
+        epoll_ctl(dp->handlers[i].epoll_fd, EPOLL_CTL_DEL,
+                  xsk_socket__fd(sock->xsk), NULL);
+    }
+    dp->channels[port_idx].sock = NULL;
+
+    return error;
 }
 
 static void
@@ -830,18 +840,21 @@ port_del_channels(struct dp_xdp *dp, odp_port_t port_no)
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
 
-    if (!dp->handlers || port_idx >= dp->uc_array_size
+    if (!dp->handlers || port_idx >= dp->n_channels
         || !dp->channels[port_idx].sock) {
         return;
     }
 
     for (i = 0; i < dp->n_handlers; i++) {
         struct dp_handler *handler = &dp->handlers[i];
-
-        memset(handler->fds, 0 , sizeof(handler->fds));
-        handler->event_offset = 0;
+        epoll_ctl(handler->epoll_fd, EPOLL_CTL_DEL,
+                  xsk_socket__fd(dp->channels[port_idx].sock->xsk), NULL);
+        handler->event_offset = handler->n_events = 0;
     }
-    xsk_sock_destroy(dp->channels[port_idx].sock); // TODO: implement this in xdp/
+
+    xsk_sock_destroy(dp->channels[port_idx].sock);
+
+    dp->channels[port_idx].sock = NULL;
 }
 
 static int
@@ -882,8 +895,7 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
     for (i = 0; i < n_handlers; i++) {
         struct dp_handler *handler = &dp->handlers[i];
 
-        memset(handler->fds, 0, sizeof(handler->fds));
-        handler->event_offset = 0;
+        handler->event_offset = handler->n_events = 0;
     }
 
     dpif_xdp_port_dump_start__(dp, &state);
@@ -892,10 +904,10 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
         uint32_t upcall_pid;
         int error;
 
-        if (port_no >= dp->uc_array_size
+        if (port_no >= dp->n_channels
             || !port_get_pid(dp, port_no, &upcall_pid)) {
             struct xsk_socket_info *sock = NULL;
-            error = create_xsk_sock(dp, sock, port.name);
+            error = xsk_sock_create(&sock, port.name);
 
             if (error) {
                 goto error;
@@ -905,7 +917,7 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
             if (error) {
                 VLOG_INFO("%s: could not add channels for port %s",
                           dpif_name(dp->dpif), port.name);
-                xsk_sock_destroy(sock); // TODO: implement method in xdp/
+                xsk_sock_destroy(sock);
                 retval = error;
                 goto error;
             }
@@ -1012,10 +1024,7 @@ create_dpif_xdp(struct dp_xdp *dp)
     dpif_init(&dpif->dpif, dp->class, dp->name, netflow_id >> 8, netflow_id);
     dpif->dp = dp;
     fat_rwlock_init(&dp->upcall_lock);
-    dp->n_handlers = 1;
-    VLOG_INFO("---- before seq_read: %s ----", __func__);
     dpif->last_port_seq = seq_read(dp->port_seq);
-    VLOG_INFO("---- after seq_read: %s ----", __func__);
     return &dpif->dpif;
 }
 
@@ -1023,46 +1032,15 @@ static int
 dp_xdp_handler_init(struct dp_handler *handler)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    int error = 0;
-
-    /* TODO: initialise handler */
-
-    return error;
+    handler->epoll_fd = epoll_create(10);
+    return handler->epoll_fd < 0 ? errno : 0;
 }
 
 static void
 dp_xdp_handler_uninit(struct dp_handler *handler)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    /* TODO: uninitialise handler */
-}
-
-static int
-dp_xdp_channels_create(struct dp_xdp *dp)
-{
-    VLOG_INFO("---- Called: %s ----", __func__);
-    int i;
-    int error = 0;
-    /* TODO: create channels */
-    for ( i = 0; i < dp->n_channels ; i++)
-    {
-        // struct afxdp_channel *channel = &dp->channels[i];
-
-        /* TODO: initialise channel */
-        /* TODO: open channel */
-        if (error) {
-            goto out;
-        }
-    }
-
-out:
-    if (error) {
-        fat_rwlock_wrlock(&dp->upcall_lock);
-        destroy_all_channels(dp);
-        fat_rwlock_unlock(&dp->upcall_lock);
-    }
-
-    return error;
+    close(handler->epoll_fd);
 }
 
 static int
@@ -1074,7 +1052,6 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
     struct dp_xdp *dp;
     int error;
 
-    VLOG_INFO("---- dp name: %s ----", name);
     dp = xzalloc(sizeof *dp);
     shash_add(&dp_xdps, name, dp);
 
@@ -1099,12 +1076,6 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
     
     /* Initialse channels */
     /* TODO: initialise n_channels */
-    dp->n_channels = 1;
-
-    error = dp_xdp_channels_create(dp);
-    if (error) {
-        goto out;
-    }
 
     cmap_init(&dp->entry_points);
 
@@ -1115,9 +1086,7 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
     /* TODO: Assign the upcall_id to the entry point(s) should derive 
        these from the channels */
 
-out:
     if (error) {
-        VLOG_INFO("---- error in: %s ----", __func__);
         dp_xdp_free(dp);
         return error;
     }
@@ -1151,7 +1120,7 @@ dpif_xdp_mask_from_nlattrs(const struct nlattr *key, uint32_t key_len,
 
 static void
 dp_xdp_ep_remove_flow(struct dp_xdp_entry_point *ep,
-                      struct dp_xdp_flow *flow)
+                      struct xdp_flow *flow)
     // OVS_REQUIRES(ep->flow_mutex) /* TODO: check if needed. Comment in dp_xdp_entry_point too */
 {
     /* TODO: remove flow from the ep->flow_table_cache bpf_map */
@@ -1161,7 +1130,7 @@ static void
 dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    // struct dp_xdp_flow *xdp_flow;
+    // struct xdp_flow *xdp_flow;
 
     // ovs_mutex_lock(&ep->flow_mutex); /* TODO: uncomment if needed */
     
@@ -1171,25 +1140,27 @@ dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep)
     // ovs_mutex_unlock(&ep->flow_mutex); /* TODO: uncomment if needed */
 }
 
-static struct dp_xdp_flow *
+static struct xdp_flow *
 dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
-                          const struct xdp_flow_key *key,
+                          struct xdp_flow_key *key,
                           int *lookup_num_p)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    struct dp_xdp_flow *xdp_flow = NULL;
+    struct xdp_flow *xdp_flow = NULL;
 
     /* TODO: implement method */
+
+    xdp_ep_flow_lookup(ep->flow_map_fd, key, xdp_flow);
     return xdp_flow;
 }
 
-static struct dp_xdp_flow *
+static struct xdp_flow *
 dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
                         const ovs_u128 *ufidp, const struct nlattr *key,
                         size_t key_len)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    // struct dp_xdp_flow *xdp_flow;
+    // struct xdp_flow *xdp_flow;
     // struct flow flow;
     // ovs_u128 ufid;
 
@@ -1205,39 +1176,64 @@ dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
     return NULL;
 }
 
+static struct xdp_flow * dp_xdp_ep_next_flow(const struct dp_xdp_entry_point *ep,
+                        struct xdp_flow_key *key)
+{
+    // VLOG_INFO("---- Called: %s ----", __func__);
+    struct xdp_flow *xdp_flow = NULL;
+    
+    /* returns xdp_flow = NULL when end of map */
+    xdp_ep_flow_next(ep->flow_map_fd, key, xdp_flow);
+
+    return xdp_flow;
+}                        
+
 static struct dpif_xdp_flow_dump *
 dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     return CONTAINER_OF(dump, struct dpif_xdp_flow_dump, up);
 }
 
 static struct dpif_xdp_flow_dump_thread *
 dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     return CONTAINER_OF(thread, struct dpif_xdp_flow_dump_thread, up);
 }
 
 /* Configures the 'ep' based on the input argument. */
 static int
-dp_xdp_configure_ep(struct dp_xdp_entry_point *ep, struct dp_xdp *dp,
-                        odp_port_t port_no, const char *devname)
+dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
+                        struct dp_xdp_port *port, const char *devname)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s, devname %s ----", __func__, devname);
+    struct xdp_ep xdp_ep;
     int error = 0;
-    ep->dp = dp;
-    ovs_refcount_init(&ep->ref_cnt);
-    ep->port_no = port_no;
-
+    struct dp_xdp_entry_point *ep;
+    *epp = NULL;
+    char *path = xasprintf("%s/xdp", ovs_pkgdatadir());
     /* load the xdp program */
-    error = xdp_load(devname);
+    error = xdp_load(&xdp_ep, path, devname);
     if (error) {
         goto out;
     }
-    cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
-                hash_int(odp_to_u32(port_no), 0));
+    /* check if port has been configure on an already existing ep */
+    ep = dp_xdp_get_ep(dp, xdp_ep.ep_id);
+    if (!ep) {
+        ep = xzalloc(sizeof *ep);
+        ep->dp = dp;
+        ep->ep_id = xdp_ep.ep_id;
+        ovs_refcount_init(&ep->ref_cnt);
+        hmap_init(&ep->ports);
+        cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
+                    hash_int(xdp_ep.ep_id, 0));
+    }
 
+    hmap_insert(&ep->ports, &port->epnode, hash_port_no(port->port_no));
+    port->ep_id = xdp_ep.ep_id;
+
+    *epp = ep;
     /* TODO: implement method */
     
 out:
@@ -1274,14 +1270,14 @@ dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep)
 static bool
 dp_xdp_ep_try_ref(struct dp_xdp_entry_point *ep)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     return ovs_refcount_try_ref_rcu(&ep->ref_cnt);
 }
 
 static void
 dp_xdp_ep_unref(struct dp_xdp_entry_point *ep)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     if (ep && ovs_refcount_unref(&ep->ref_cnt) == 1) {
         ovsrcu_postpone(dp_xdp_destroy_ep, ep);
     }
@@ -1312,7 +1308,7 @@ dp_xdp_actions_create(const struct nlattr *actions, size_t size)
 }
 
 struct dp_xdp_actions *
-dp_xdp_flow_get_actions(const struct dp_xdp_flow *flow)
+dp_xdp_flow_get_actions(const struct xdp_flow *flow)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     // return ovsrcu_get(struct dp_xdp_actions *, &flow->actions);
@@ -1325,13 +1321,13 @@ dp_xdp_flow_get_actions(const struct dp_xdp_flow *flow)
  *
  * Caller must unrefs the returned reference.  */
 static struct dp_xdp_entry_point *
-dp_xdp_get_ep(struct dp_xdp *dp, odp_port_t port_no)
+dp_xdp_get_ep(struct dp_xdp *dp, int ep_id)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s, ep_id %d ----", __func__, ep_id);
     struct dp_xdp_entry_point *ep;
     const struct cmap_node *pnode;
 
-    pnode = cmap_find(&dp->entry_points, hash_int(port_no, 0));
+    pnode = cmap_find(&dp->entry_points, hash_int(ep_id, 0));
     if (!pnode) {
         return NULL;
     }
@@ -1347,7 +1343,7 @@ dp_xdp_get_ep(struct dp_xdp *dp, odp_port_t port_no)
 static struct dp_xdp_entry_point *
 dp_xdp_ep_get_next(struct dp_xdp *dp, struct cmap_position *pos)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp_entry_point *next;
 
     do {
@@ -1363,11 +1359,29 @@ dp_xdp_ep_get_next(struct dp_xdp *dp, struct cmap_position *pos)
 
 static void
 dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp,
-                            const struct dp_xdp_flow *xdp_flow,
+                            const struct xdp_flow *xdp_flow,
+                            struct ofpbuf *key_buf, struct ofpbuf *mask_buf, struct ofpbuf *act_buf,
+                            struct dpif_flow *flow, bool terse)
+{
+    VLOG_INFO("---- Called: %s 0 ----", __func__);
+
+    /* TODO: implement this method */
+
+    /* TODO: make sure that the method checks if the flow is available
+       already before adding it since our method may result in the same
+       flow on different entry points. */
+}
+
+/* NOTE: when a single flow is being requested by flow_get the buffer provided maybe small for key, mask
+ * and actions to fit in. Therefore we will pass the actions to the point thats not in the buffer as other
+ * dpif hence this overloaded function */
+static void
+dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp,
+                            const struct xdp_flow *xdp_flow,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
                             struct dpif_flow *flow, bool terse)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s 1 ----", __func__);
 
     /* TODO: implement this method */
 
@@ -1377,7 +1391,7 @@ dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp,
 }
 
 static void
-dpif_xdp_flow_get_stats(const struct dp_xdp_flow *flow,
+dpif_xdp_flow_get_stats(const struct xdp_flow *flow,
                             struct dpif_flow_stats *stats)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
@@ -1393,7 +1407,7 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
                 struct dpif_flow_stats *stats)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    struct dp_xdp_flow *xdp_flow;
+    struct xdp_flow *xdp_flow;
     int error = 0;
 
     if (stats) {
@@ -1473,6 +1487,16 @@ dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
     ovs_u128 ufid;
     int error = 0;
     bool probe = put->flags & DPIF_FP_PROBE;
+
+    /* Print for debug */
+    struct ds ds = DS_EMPTY_INITIALIZER;
+
+    /* XXX: Use dpif_format_flow()? */
+    odp_flow_format(put->key, put->key_len, put->mask, put->mask_len, NULL, &ds, true);
+    ds_put_cstr(&ds, ", actions=");
+    format_odp_actions(&ds, put->actions, put->actions_len, NULL);
+    VLOG_INFO("Translating odp key to xdp key:\n%s", ds_cstr(&ds));
+    ds_destroy(&ds);
 
     if (put->stats) {
         memset(put->stats, 0, sizeof *put->stats);
@@ -1557,14 +1581,15 @@ flow_del_on_ep(struct dp_xdp_entry_point *ep,
                 struct dpif_flow_stats *stats,
                 const struct dpif_flow_del *del)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
-    struct dp_xdp_flow *xdp_flow;
+    // VLOG_INFO("---- Called: %s ----", __func__);
+    struct xdp_flow *xdp_flow;
     int error = 0;
 
     // ovs_mutex_lock(&ep->flow_mutex); // TODO: check if needed
     xdp_flow = dp_xdp_ep_find_flow(ep, del->ufid, del->key,
                                           del->key_len);
     if (xdp_flow) {
+        VLOG_INFO("== Called: %s, xdp_flow not null ==", __func__);
         if (stats) {
             dpif_xdp_flow_get_stats(xdp_flow, stats);
         }
@@ -1580,7 +1605,7 @@ flow_del_on_ep(struct dp_xdp_entry_point *ep,
 static int
 dpif_xdp_flow_del(struct dpif *dpif, const struct dpif_flow_del *del)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_entry_point *ep;
     int error = 0;
@@ -1658,9 +1683,9 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
 static int
 dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
-    struct dp_xdp_flow *xdp_flow;
+    struct xdp_flow *xdp_flow;
     struct dp_xdp_entry_point *ep;
     struct hmapx to_find = HMAPX_INITIALIZER(&to_find);
     struct hmapx_node *node;
@@ -1673,6 +1698,7 @@ dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
             }
         }
     } else {
+        // VLOG_INFO("== get->pmd_id: %d ==", get->pmd_id);
         ep = dp_xdp_get_ep(dp, get->pmd_id);
         if (!ep) {
             goto out;
@@ -1685,11 +1711,15 @@ dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
     }
 
     HMAPX_FOR_EACH (node, &to_find) {
+        struct ds ds = DS_EMPTY_INITIALIZER;
+        odp_format_ufid(get->ufid, &ds);
+        // VLOG_INFO("== get->ufid: %s ==", ds_cstr(&ds));
         ep = (struct dp_xdp_entry_point *) node->data;
         xdp_flow = dp_xdp_ep_find_flow(ep, get->ufid, get->key,
                                               get->key_len);
         if (xdp_flow) {
-            dp_xdp_flow_to_dpif_flow(dp, xdp_flow, get->buffer,
+            // VLOG_INFO("== dp_xdp_ep_find_flow xdp_flow not null ==");
+            dp_xdp_flow_to_dpif_flow__(dp, xdp_flow, get->buffer,
                                         get->buffer, get->flow, false);
             error = 0;
             break;
@@ -1733,9 +1763,7 @@ dpif_xdp_enumerate(struct sset *all_dps, const struct dpif_class *dpif_class)
 
     ovs_mutex_lock(&dp_xdp_mutex);
     SHASH_FOR_EACH(node, &dp_xdps) {
-        VLOG_INFO("For each");
         struct dp_xdp *dp = node->data;
-        VLOG_INFO("--- dp name: %s , node name: %s ---", dp->name, node->name);
         if (dpif_class != dp->class) {
             /* 'dp_netdevs' contains both "netdev" and "dummy" dpifs.
              * If the class doesn't match, skip this dpif. */
@@ -1752,8 +1780,7 @@ static const char *
 dpif_xdp_port_open_type(const struct dpif_class *dpif_class,
                                   const char *type)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
-    VLOG_INFO("--- Port open type: %s ---", type);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     return strcmp(type, "internal") ? type : "tap";
 }
 
@@ -1763,8 +1790,6 @@ dpif_xdp_open(const struct dpif_class *dpif_class,
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp;
-    struct dp_xdp *dpp;
-    struct dp_xdp *dppp;
     int error;
 
     error = dpif_xdp_init();
@@ -1783,16 +1808,12 @@ dpif_xdp_open(const struct dpif_class *dpif_class,
                  : create ? EEXIST
                  : 0);
     }
-    dpp = shash_find_data(&dp_xdps, name);
-    VLOG_INFO("---- added: %s in func %s ----", dpp->name, __func__);
     if (!error) {
         *dpifp = create_dpif_xdp(dp);
         if (create) {
             dp->dpif = *dpifp;
         }
     }
-    dppp = shash_find_data(&dp_xdps, name);
-    VLOG_INFO("---- added: %s in func %s ----", dppp->name, __func__);
     ovs_mutex_unlock(&dp_xdp_mutex);
 
     return error;
@@ -1828,8 +1849,6 @@ dpif_xdp_destroy(struct dpif *dpif)
 static bool
 dpif_xdp_run(struct dpif *dpif)
 {
-    struct dp_xdp *dp = get_dp_xdp(dpif);
-    VLOG_INFO("---- Called: %s -- n_handlers: %d ----", __func__, dp->n_handlers);
     /* TODO: check if this is needed for now returning
        false indicating that there is no periodic work 
        needed to be done. */
@@ -1840,7 +1859,7 @@ dpif_xdp_run(struct dpif *dpif)
 static int
 dpif_xdp_get_stats(const struct dpif *dpif, struct dpif_dp_stats *stats)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_entry_point *ep;
 
@@ -1884,6 +1903,7 @@ dpif_xdp_port_add(struct dpif *dpif, struct netdev *netdev,
 
 unlock:
     ovs_mutex_unlock(&dp->port_mutex);
+    VLOG_INFO("---- Edded: %s, error %d ----", __func__, error);
     return error;
 }
 
@@ -1928,8 +1948,7 @@ static int
 dpif_xdp_port_query_by_name(const struct dpif *dpif, const char *devname,
                               struct dpif_port *dpif_port)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
-    VLOG_INFO("--- Name of port: %s ---", devname);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_port *port;
     int error;
@@ -1986,7 +2005,7 @@ dpif_xdp_port_get_pid(const struct dpif *dpif, odp_port_t port_no)
 static int
 dpif_xdp_port_dump_start__(struct dp_xdp *dp, struct dpif_xdp_port_state *state)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     state = xzalloc(sizeof(struct dpif_xdp_port_state));
     return 0;
 }
@@ -1994,7 +2013,7 @@ dpif_xdp_port_dump_start__(struct dp_xdp *dp, struct dpif_xdp_port_state *state)
 static int
 dpif_xdp_port_dump_start(const struct dpif *dpif, void **statep)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     // struct dp_xdp *dp = get_dp_xdp(dpif);
     // struct dpif_xdp_port_state state;
 
@@ -2013,23 +2032,18 @@ static int
 dpif_xdp_port_dump_next__(const struct dp_xdp *dp, struct dpif_xdp_port_state *state,
                           struct dp_xdp_port *port)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct hmap_node *node;
     int retval = 0;
 
     ovs_mutex_lock(&dp->port_mutex);
     node = hmap_at_position(&dp->ports, &state->position);
     if (node) {
-        VLOG_INFO("-- node not null --");
         port = CONTAINER_OF(node, struct dp_xdp_port, node);
-        VLOG_INFO("-- after  CONTAINER_OF --");
         // free(state->name);
-        VLOG_INFO("-- after free --");
         state->name = xstrdup(netdev_get_name(port->netdev));
-        VLOG_INFO("--- port name: %s ---", state->name);
         retval = 0;
     } else {
-        VLOG_INFO("---- returning error in %s ----", __func__);
         retval = EOF;
     }
     ovs_mutex_unlock(&dp->port_mutex);
@@ -2039,13 +2053,11 @@ static int
 dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
                           struct dpif_port *dpif_port)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_port_state *state = state_;
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct hmap_node *node;
     int retval = 0;
-
-    VLOG_INFO("---- dp name: %s in func %s, bucket: %d, offset: %d ----", dp->name, __func__, state->position.bucket, state->position.offset);
     
     ovs_mutex_lock(&dp->port_mutex);
     struct dp_xdp_port port;
@@ -2058,14 +2070,13 @@ dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
         retval = EOF;
     }
     ovs_mutex_unlock(&dp->port_mutex);
-
     return retval;
 }
 
 static int
 dpif_xdp_port_dump_done(const struct dpif *dpif, void *state_)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_port_state *state = state_;
     free(state->name);
     free(state);
@@ -2087,7 +2098,6 @@ dpif_xdp_port_poll(const struct dpif *dpif_, char **devnamep)
     } else {
         error = EAGAIN;
     }
-
     return error;
 }
 
@@ -2121,7 +2131,7 @@ dpif_xdp_flow_dump_create(
         bool terse,
         struct dpif_flow_dump_types *types)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_flow_dump *dump;
 
     dump = xzalloc(sizeof *dump);
@@ -2141,7 +2151,7 @@ dpif_xdp_flow_dump_create(
 static int
 dpif_xdp_flow_dump_destroy(struct dpif_flow_dump *dump_)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_flow_dump *dump = dpif_xdp_flow_dump_cast(dump_);
 
     ovs_mutex_destroy(&dump->mutex);
@@ -2153,7 +2163,7 @@ static struct dpif_flow_dump_thread *
 dpif_xdp_flow_dump_thread_create(
         struct dpif_flow_dump *dump_)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_flow_dump *dump = dpif_xdp_flow_dump_cast(dump_);
     struct dpif_xdp_flow_dump_thread *thread;
 
@@ -2166,7 +2176,7 @@ dpif_xdp_flow_dump_thread_create(
 static void
 dpif_xdp_flow_dump_thread_destroy(struct dpif_flow_dump_thread *thread_)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_flow_dump_thread *thread
         = dpif_xdp_flow_dump_thread_cast(thread_);
 
@@ -2177,16 +2187,17 @@ static int
 dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
                           struct dpif_flow *flows, int max_flows)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_flow_dump_thread *thread
         = dpif_xdp_flow_dump_thread_cast(thread_);
     struct dpif_xdp_flow_dump *dump = thread->dump;
-    struct dp_xdp_flow *xdp_flows[FLOW_DUMP_MAX_BATCH];
+    struct xdp_flow *xdp_flows[FLOW_DUMP_MAX_BATCH];
     struct dpif_xdp *dpif = dpif_xdp_cast(thread->up.dpif);
     struct dp_xdp *dp = get_dp_xdp(&dpif->dpif);
     int n_flows = 0;
     int i;
 
+    
     ovs_mutex_lock(&dump->mutex);
     if(!dump->status) {
         struct dp_xdp_entry_point *ep = dump->cur_ep;
@@ -2202,7 +2213,6 @@ dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
 
             }
         }
-
         /* TODO: recheck logic for the flow_table_cache if the flows 
            on these tables are different the will need to search through
            every endpoint hence our do while will need to change
@@ -2212,11 +2222,23 @@ dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
            we won't have duplicates. */
         do {
             for (n_flows = 0; n_flows < flow_limit; n_flows++) {
-                /* TODO: fetch flows from flow_table_cache something like below */
+                /* TODO: fetch flows from flow_table something like below */
+                /* TODO: if duplicate keys are not resolved e.g concatenate the stats
+                 * need to refactor the design. Where either a flow can only appear in
+                 * one ep or when dumping we check the other ep for the same flow. E.g,
+                 * ep(1) has key x check if x is in ep(2) ep(3) etc. And when on ep(3) 
+                 * check if x in in ep(1) or an earlier ep(n). If already there means
+                 * it has been dumped already go to the next */
+                struct xdp_flow *xdp_flow;
 
-                // xdp_flows[n_flows] = flow_from_map
+                xdp_flow = dp_xdp_ep_next_flow(ep, &dump->flow_pos);
+
+                // If no flow found break
+                if (!xdp_flow) {
+                    break;
+                }
+                xdp_flows[n_flows] = xdp_flow;
             }
-
             if (n_flows < flow_limit) {
                 memset(&dump->flow_pos, 0, sizeof dump->flow_pos);
                 dp_xdp_ep_unref(ep);
@@ -2240,13 +2262,15 @@ dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
     for (i = 0; i < n_flows; i++) {
         struct odputil_keybuf *maskbuf = &thread->maskbuf[i];
         struct odputil_keybuf *keybuf = &thread->keybuf[i];
-        struct dp_xdp_flow *xdp_flow = xdp_flows[i];
+        struct odputil_keybuf *actbuf = &thread->actbuf[i];
+        struct xdp_flow *xdp_flow = xdp_flows[i];
         struct dpif_flow *f = &flows[i];
-        struct ofpbuf key, mask;
+        struct ofpbuf key, mask, act;
 
         ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
         ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
-        dp_xdp_flow_to_dpif_flow(dp, xdp_flow, &key, &mask, f,
+        ofpbuf_use_stack(&act, actbuf, sizeof *actbuf);
+        dp_xdp_flow_to_dpif_flow(dp, xdp_flow, &key, &mask, &act, f,
                                     dump->up.terse);
     }
 
@@ -2257,7 +2281,7 @@ static void
 dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
                     enum dpif_offload_type offload_type)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     size_t i;
 
     for (i = 0; i < n_ops; i++) {
@@ -2266,18 +2290,22 @@ dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
         switch (op->type) {
         case DPIF_OP_FLOW_PUT:
             op->error = dpif_xdp_flow_put(dpif, &op->flow_put);
+            VLOG_INFO("---- Ended: %s dpif_xdp_flow_put, error: %d  ----", __func__, op->error);
             break;
 
         case DPIF_OP_FLOW_DEL:
             op->error = dpif_xdp_flow_del(dpif, &op->flow_del);
+            VLOG_INFO("---- Ended: %s dpif_xdp_flow_del, error: %d  ----", __func__, op->error);
             break;
 
         case DPIF_OP_EXECUTE:
             op->error = dpif_xdp_execute(dpif, &op->execute);
+            VLOG_INFO("---- Ended: %s dpif_xdp_execute, error: %d  ----", __func__, op->error);
             break;
 
         case DPIF_OP_FLOW_GET:
             op->error = dpif_xdp_flow_get(dpif, &op->flow_get);
+            VLOG_INFO("---- Ended: %s dpif_xdp_flow_get, error: %d  ----", __func__, op->error);
             break;
         }
     }
@@ -2300,7 +2328,7 @@ dpif_xdp_recv_set(struct dpif *dpif, bool enable)
         error = dp_xdp_refresh_channels(dp, 1);
     }
     fat_rwlock_unlock(&dp->upcall_lock);
-
+    VLOG_INFO("---- Edded: %s, error %d ----", __func__, error);
     return error;    
 
 }
@@ -2317,7 +2345,6 @@ dpif_xdp_handlers_set(struct dpif *dpif, uint32_t n_handlers)
         error = dp_xdp_refresh_channels(dp, n_handlers);
     }
     fat_rwlock_unlock(&dp->upcall_lock);
-
     return error;
 }
 
@@ -2333,14 +2360,6 @@ extract_key(struct dp_xdp *dp, const struct xdp_flow_key *key,
         .support = dp_xdp_support, /* used at odp_flow_key_from_flow */
     };
 
-    // block if for debug to check what data is being sent
-    // {
-    //     struct ds ds = DS_EMPTY_INITIALIZER;
-
-    //     bpf_flow_key_format(&ds, key);
-    //     VLOG_INFO("bpf_flow_key_format\n%s", ds_cstr(&ds));
-    //     ds_destroy(&ds);
-    // }
 
     /* This function goes first because it zeros out flow. */
     flow_extract(packet, &flow);
@@ -2348,26 +2367,22 @@ extract_key(struct dp_xdp *dp, const struct xdp_flow_key *key,
     // bpf_flow_key_extract_metadata(key, &flow); // probably don't need this
 
 
-    // if (flow.in_port.odp_port != 0) {
-    //     flow.in_port.odp_port = ifindex_to_odp(dp,
-    //                                 odp_to_u32(flow.in_port.odp_port));
-    // } else {
+  
     if (flow.in_port.odp_port == 0) {
+        VLOG_INFO("-- start (flow.in_port.odp_port --");
         flow.in_port.odp_port = packet->md.in_port.odp_port;
     }
-    // }
-    VLOG_INFO("flow.in_port.odp_port %d", flow.in_port.odp_port);
 
     // block for debug printing
-    // if (1) {
-    //     struct ds ds = DS_EMPTY_INITIALIZER;
+    if (1) {
+        struct ds ds = DS_EMPTY_INITIALIZER;
 
-    //     flow_format(&ds, &flow, NULL);
-    //     VLOG_WARN("Upcall flow:\n%s",
-    //               ds_cstr(&ds));
-    //     ds_destroy(&ds);
+        flow_format(&ds, &flow, NULL);
+        VLOG_WARN("Func %s Upcall flow:\n%s", __func__,
+                  ds_cstr(&ds));
+        ds_destroy(&ds);
 
-    // }
+    }
 
     odp_flow_key_from_flow(&parms, buf);
 
@@ -2388,10 +2403,6 @@ dp_xdp_flow_hash(const void *key, size_t key_len, ovs_u128 *hash)
     uuid_set_bits_v4((struct uuid *)hash);
 }
 
-/* perf_channel_read() fills the first part of 'buffer' with the full event.
- * Here, the key will be extracted immediately following it, and 'upcall'
- * will be initialized to point within 'buffer'.
- */
 static int
 xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
                         struct dpif_upcall *upcall, struct ofpbuf *buffer)
@@ -2416,7 +2427,6 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
         return err;
     }
 
-    VLOG_INFO("ifindex %d odp %d", e->header.ifindex, port->port_no);
     if (port->port_no == ODPP_NONE) {
         VLOG_WARN("failed to map upcall ifindex=%d to odp",
                      e->header.ifindex);
@@ -2450,9 +2460,10 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
     return 0;
 }
 
-/* perf_channel_read() fills the first part of 'buffer' with the full event.
- * Here, the key will be extracted immediately following it, and 'upcall'
- * will be initialized to point within 'buffer'.
+/* xsk_socket_read fills the first part of 'buffer' with the ovs_xsk_event
+ * which contains the upcall packet from the datapath and it's metadata.
+ * This method will extract the key from the packet and add it to the buffer
+ * the point the upcall->packet and upcall->key to the data in the buffer.
  */
 static int
 xsk_socket_data_to_upcall_miss(struct dp_xdp *dp, struct ovs_xsk_event *e,
@@ -2462,6 +2473,7 @@ xsk_socket_data_to_upcall_miss(struct dp_xdp *dp, struct ovs_xsk_event *e,
     int err;
 
     err = xsk_socket_data_to_upcall__(dp, e, upcall, buffer);
+    
     if (err) {
         return err;
     }
@@ -2479,9 +2491,6 @@ xsk_socket_data_to_upcall_userspace(struct dp_xdp *dp, struct ovs_xsk_event *e,
                                 struct ofpbuf *buffer)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    // const struct nlattr *actions = (struct nlattr *)e->header.uactions;
-    // const struct nlattr *a;
-    // unsigned int left;
     int err;
 
     err = xsk_socket_data_to_upcall__(dp, e, upcall, buffer);
@@ -2489,154 +2498,153 @@ xsk_socket_data_to_upcall_userspace(struct dp_xdp *dp, struct ovs_xsk_event *e,
         return err;
     }
 
-    // NL_ATTR_FOR_EACH_UNSAFE (a, left, actions, e->header.uactions_len) {
-    //     switch (nl_attr_type(a)) {
-    //     case OVS_USERSPACE_ATTR_PID:
-    //         //nl_attr_get_u32(a);
-    //         break;
-    //     case OVS_USERSPACE_ATTR_USERDATA:
-    //         upcall->userdata = CONST_CAST(struct nlattr *, a);
-    //         break;
-    //     default:
-    //         VLOG_INFO("%s unsupported userspace action. %d",
-    //                   __func__, nl_attr_type(a));
-    //         return EOPNOTSUPP;
-    //     }
-    // }
+    /* TODO: implement method */
+   
 
     upcall->type = DPIF_UC_ACTION;
     return 0;
 }
 
-static __u64 ether_addr_to_u64(const __u8 *addr)
+static void xsk_free_umem_frame(struct xsk_socket_info *xsk, uint64_t frame)
 {
-    __u64 u = 0;
-    int i;
+    ovs_assert(xsk->umem_frame_free < NUM_FRAMES);
 
-    for (i = 6; i >= 0; i--)
-        u = u << 8 | addr[i];
-    return u;
+    xsk->umem_frame_addr[xsk->umem_frame_free++] = frame;
 }
 
-static void 
-hex_dump(struct ovs_xsk_event *e, size_t length, __u64 addr)
+static uint64_t xsk_umem_free_frames(struct xsk_socket_info *xsk)
 {
-    VLOG_INFO("packet len: %d", e->header.pkt_len);
-    VLOG_INFO("source addr: %llx", ether_addr_to_u64(&e->data[0]));
+    return xsk->umem_frame_free;
 }
 
+static uint64_t xsk_alloc_umem_frame(struct xsk_socket_info *xsk)
+{
+    uint64_t frame;
+    if (xsk->umem_frame_free == 0)
+        return INVALID_UMEM_FRAME;
+
+    frame = xsk->umem_frame_addr[--xsk->umem_frame_free];
+    xsk->umem_frame_addr[xsk->umem_frame_free] = INVALID_UMEM_FRAME;
+    return frame;
+}
+
+/* TODO: factor for xsk_ring_prod__needs_wakeup */
 static int 
-xsk_socket_read(struct xsk_socket_info *xsk, int num_socks, struct pollfd *fds, struct ofpbuf *buf)
+xsk_socket_read(struct xsk_socket_info *xsk, struct ofpbuf *buf)
 {
-    unsigned int rcvd, i;
-    __u32 idx_rx = 0, idx_fq = 0;
+    VLOG_INFO("---- Called: %s ----", __func__);
+    unsigned int rcvd, stock_frames, i;
+    uint32_t idx_rx = 0, idx_fq = 0;
     int ret;
-    int opt_timeout = -1;
 
     rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
-    if (!rcvd) {
-        if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-            ret = poll(fds, num_socks, opt_timeout);
-        return 0;
-    }
-
-    if (rcvd > 1) {
-        VLOG_INFO("!!!!!!!!!!!! This program doesn't support batch processing yet !!!!!!!!!!");
+    if (!rcvd)
         return -1;
+
+    /* Stuff the ring with as much frames as possible */
+    stock_frames = xsk_prod_nb_free(&xsk->umem->fq,
+                    xsk_umem_free_frames(xsk));
+    if (stock_frames > 0) {
+
+        ret = xsk_ring_prod__reserve(&xsk->umem->fq, stock_frames,
+                         &idx_fq);
+
+        /* This should not happen, but just in case */
+        while (ret != stock_frames)
+            ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd,
+                             &idx_fq);
+
+        for (i = 0; i < stock_frames; i++)
+            *xsk_ring_prod__fill_addr(&xsk->umem->fq, idx_fq++) =
+                xsk_alloc_umem_frame(xsk);
+
+        xsk_ring_prod__submit(&xsk->umem->fq, stock_frames);
     }
 
-    ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
-    while (ret != rcvd) {
-        if (ret < 0)
-            return ret; // TODO: check if it's the appropriate way to respond to error
-        if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-            ret = poll(fds, num_socks, opt_timeout);
-        ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
-    }
-
+    /* Process received packets */
     for (i = 0; i < rcvd; i++) {
-        __u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
-        __u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
-        __u64 orig = xsk_umem__extract_addr(addr);
-
-        addr = xsk_umem__add_offset_to_addr(addr);
+        uint64_t addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
+        uint32_t len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
         struct ovs_xsk_event *e = xsk_umem__get_data(xsk->umem->buffer, addr);
-        hex_dump(e, len, addr); // for debug
-
         // TODO: factor for batch processing
         int event_len = e->header.pkt_len + sizeof(struct xdp_upcall);
         ofpbuf_clear(buf); 
-        ofpbuf_push(buf, e, event_len);
-
-        *xsk_ring_prod__fill_addr(&xsk->umem->fq, idx_fq++) = orig;
+        ofpbuf_put(buf, e, event_len);
+        buf->header = buf->data;
+        xsk_free_umem_frame(xsk, addr);
+        xsk->stats.rx_bytes += len;
     }
-
-    xsk_ring_prod__submit(&xsk->umem->fq, rcvd);
     xsk_ring_cons__release(&xsk->rx, rcvd);
     xsk->stats.rx_packets += rcvd;
     return 0;
 }
 
 static int
-recv_from_socket(struct dp_xdp *dp, struct xsk_socket_info *sock,
-        struct dpif_upcall *upcall, struct ofpbuf *buffer)
+recv_from_socket(struct dp_xdp *dp, struct ovs_xsk_event *e, struct dpif_upcall *upcall, 
+        struct ofpbuf *buffer)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    struct ovs_xsk_event *e = buffer->header;
+    // struct ovs_xsk_event *e = buffer->header;
 
     switch (e->header.type) {
     case OVS_PACKET_CMD_MISS:
+        VLOG_INFO("---- OVS_PACKET_CMD_MISS %s ----", __func__);
         return xsk_socket_data_to_upcall_miss(dp, e, upcall, buffer);
         break;
     case OVS_PACKET_CMD_ACTION:
+        VLOG_INFO("---- OVS_PACKET_CMD_ACTION %s ----", __func__);
         return xsk_socket_data_to_upcall_userspace(dp, e, upcall, buffer);
         break;
     default:
+        VLOG_INFO("---- default %s ----", __func__);
         break;
     }
-
+    VLOG_INFO("---- Ended: %s ----", __func__);
     return EINVAL;
 }
 
+/* TODO: this seems with high frequency as compared to the dpif_netlink. Should probably investigate the
+ * reasons since this most likley will affect performace. */
 static int
 dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
                 struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
-    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
+    // VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_handler *handler;
     int error;
 
     fat_rwlock_wrlock(&dp->upcall_lock);
-    if (!dp->handlers || handler_id >= dp->n_handlers) {
+    if (!dp->handlers || handler_id >= dp->n_handlers || dp->n_channels == 0) {
         error = EAGAIN;
         goto out;
     }
-
     handler = &dp->handlers[handler_id];
-    if (handler->event_offset >= dp->n_channels) {
+    if (handler->event_offset >= handler->n_events) {
         int retval;
 
-        memset(handler->fds, 0, sizeof(handler->fds));
-        handler->event_offset = 0;
-
+        handler->event_offset = handler->n_events = 0;
         do {
-            retval = poll(handler->fds, dp->n_channels, -1);
-        } while (retval < 0);
-
+            retval = epoll_wait(handler->epoll_fd, handler->epoll_events,
+                                dp->n_channels, 0);
+            
+        } while (retval < 0 && errno == EINTR);
         if (retval < 0) {
-            VLOG_INFO("ERROR: handler poll failed");
+            static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
+            VLOG_WARN_RL(&rl, "epoll_wait failed (%s)", ovs_strerror(errno));
+        } else if (retval > 0) {
+            handler->n_events = retval;
         }
     }
 
-    while (handler->event_offset < dp->n_channels) {
-        
-        struct dp_channel *ch = &dp->channels[handler->event_offset];
+     while (handler->event_offset < handler->n_events) {
+        int idx = handler->epoll_events[handler->event_offset].data.u32;
+        struct dp_channel *ch = &dp->channels[idx];
 
         handler->event_offset++;
 
-        error = xsk_socket_read(ch->sock, dp->n_channels, handler->fds, buf);
-        if (error) {
+        error = xsk_socket_read(ch->sock, buf);
+        if (error == ENOBUFS) {
             /* ENOBUFS typically means that we've received so many
                 * packets that the buffer overflowed.  Try again
                 * immediately because there's almost certainly a packet
@@ -2645,11 +2653,21 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
             VLOG_INFO("ERROR: loss");
             continue;
         }
+        if (error) {
+            goto out;
+        }
 
         ch->last_poll = time_msec();
         
+        /* TODO: make sure recv_from_socket returns EAGAIN when nothing found */
+        error = recv_from_socket(dp, buf->header, upcall, buf);
+         /* Print for debug */
+        struct ds ds = DS_EMPTY_INITIALIZER;
 
-        error = recv_from_socket(dp, ch->sock, upcall, buf);
+        /* XXX: Use dpif_format_flow()? */
+        odp_flow_format(upcall->key, upcall->key_len, NULL, 0, NULL, &ds, true);
+        VLOG_INFO("Func %s Translating odp key to netlink key:\n%s", __func__, ds_cstr(&ds));
+        ds_destroy(&ds);
         if (error) {
             goto out;
         }
@@ -2663,16 +2681,20 @@ out:
 static void                     
 dpif_xdp_recv_wait(struct dpif *dpif, uint32_t handler_id)
 {
-    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
+    // VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dp_xdp *dp = get_dp_xdp(dpif);
+    struct dp_xdp_port *port;
+    HMAP_FOR_EACH (port, node, &dp->ports) {
+    }
 
     fat_rwlock_rdlock(&dp->upcall_lock);
-    if (dp->handlers && handler_id < dp->n_handlers) {
-        // struct dp_handler *handler = &dp->handlers[handler_id];
+     if (dp->handlers && handler_id < dp->n_handlers) {
+        struct dp_handler *handler = &dp->handlers[handler_id];
 
-        /* TODO: wait pooling on afxdp */
+        poll_fd_wait(handler->epoll_fd, POLLIN);
     }
     fat_rwlock_unlock(&dp->upcall_lock);
+    // VLOG_INFO("---- Edded: %s ----", __func__);
 }
 
 static void

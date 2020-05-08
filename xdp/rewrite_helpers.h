@@ -15,7 +15,8 @@
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
-#include "nsh.h"
+#include "nsh.h" /* nsh was getting redefinition error with <openvswitch/nsh.h> in dpif */
+// #include <openvswitch/nsh.h>
 
 /* Pops the outermost VLAN tag off the packet. Returns the popped VLAN ID on
  * success or negative errno on failure.

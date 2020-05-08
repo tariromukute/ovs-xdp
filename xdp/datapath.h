@@ -15,6 +15,28 @@ struct datapath {
 
 };
 
+struct xdp_ep_stats {
+
+};
+
+struct xdp_dp_stats {
+
+};
+
+/* For getting the details of the entry point configured on a port*/
+struct xdp_ep {
+    char *mode; /* Native, Generic, Offloaded */
+    int ep_id; /* Id for the ep, using the flow_map_fd as id may change in future */
+    int prog_fd; /* The loaded xdp program */
+    int devmap_fd; /* map with destination interfaces for batch flushing */
+    int flow_map_fd; /* Flow table, shared map. TODO: if possible make it readonly reference */
+    int stats_map_fd; /* table for stats on the performance of the ep */
+};
+
+struct xport {
+
+};
+
 struct ovs_xdp_md {
 
 };
@@ -32,7 +54,7 @@ struct ovs_xdp_md {
  * @egress_tun_info: If nonnull, becomes %OVS_PACKET_ATTR_EGRESS_TUN_KEY.
  * @mru: If not zero, Maximum received IP fragment size.
  */
-struct dp_upcall_info {
+struct dp_downcall_info {
     struct ip_tunnel_info *egress_tun_info;
     const struct nlattr *userdata;
     const struct nlattr *actions;
@@ -42,15 +64,69 @@ struct dp_upcall_info {
     __u16 mru;
 };
 
-void ovs_dp_process_packet(struct xdp_md *ctx, struct xdp_flow_key *key);
-int ovs_dp_upcall(struct datapath *, struct xdp_md *,
-          const struct xdp_flow_key *, const struct dp_upcall_info *,
-          __u32 cutlen);
+int xdp_dp_downcall(struct datapath *, const struct xdp_flow_key *,
+            const struct dp_downcall_info *);
 
-const char *ovs_dp_name(const struct datapath *dp);
+const char *xdp_dp_name(const struct datapath *dp);
+
+/* datapath crud */
+int
+xdp_dp_create(struct datapath *dp);
+
+int
+xdp_dp_update(struct datapath *dp);
+
+int
+xdp_dp_delete(struct datapath *dp);
+
+int
+xdp_dp_fetch(struct datapath *dp);
+
+/* datapath port actions */
+int
+xdp_dp_port_add(struct datapath *dp, struct xport *xport);
+
+int
+xdp_dp_port_del(struct datapath *dp, struct xport *xport);
+
+int
+xdp_dp_port_lookup(struct datapath *dp, struct xport *xport);
+
+int
+xdp_dp_port_next(struct datapath *dp, struct xport *xport);
+
+/* entry point flows */
+int
+xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_ep_flow_insert(int map_fd, struct xdp_flow *flow);
+
+int
+xdp_ep_flow_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_ep_flow_remove(int map_fd, struct xdp_flow_key *key);
+
+int
+xdp_ep_flow_flush(int map_fd);
+
+/* datapath flows */
+int
+xdp_dp_flow_lookup(struct datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_dp_flow_insert(struct datapath *dp, struct xdp_flow *flow);
+
+int
+xdp_dp_flow_next(struct datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_dp_flow_remove(struct datapath *dp, struct xdp_flow_key *key);
+
+int
+xdp_dp_flow_flush(struct datapath *dp, struct xdp_flow_key *key);
 
 
-int ovs_execute_actions(struct datapath *dp, struct xdp_md *ctx,
-            const struct xdp_flow_actions *, struct xdp_flow_key *);
 
 #endif /* xdp_datapath.h */
