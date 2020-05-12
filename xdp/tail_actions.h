@@ -27,14 +27,14 @@ struct bpf_map_def SEC("maps") tail_table = {
 struct bpf_map_def SEC("maps") percpu_actions = {
     .type = BPF_MAP_TYPE_PERCPU_ARRAY,
     .key_size = sizeof(__u32),
-    .value_size = sizeof(struct xdp_flow_actions),
+    .value_size = XDP_FLOW_ACTIONS_LEN_u64,
     .max_entries = 1,
 };
 
 struct bpf_map_def SEC("maps") flow_table = {
     .type = BPF_MAP_TYPE_HASH,
-    .key_size = sizeof(struct xdp_flow_key),
-    .value_size = sizeof(struct xdp_flow),
+    .key_size = XDP_FLOW_KEY_LEN_u64,
+    .value_size = XDP_FLOW_LEN_u64,
     .max_entries = 100,
 };
 

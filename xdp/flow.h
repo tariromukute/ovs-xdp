@@ -9,17 +9,6 @@
 #include <stdbool.h>
 #include <bpf/bpf_endian.h>
 
-#ifndef memcpy
-#define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
-#endif
-
-#define bpf_printk(fmt, ...)                                    \
-({                                                              \
-        char ____fmt[] = fmt;                                   \
-        bpf_trace_printk(____fmt, sizeof(____fmt),              \
-                         ##__VA_ARGS__);                        \
-})
-
 enum xdp_packet_cmd {
     XDP_PACKET_CMD_UNSPEC,
 
@@ -30,6 +19,8 @@ enum xdp_packet_cmd {
     /* Userspace commands. */
     XDP_PACKET_CMD_EXECUTE  /* Apply actions to a packet. */
 };
+
+/* Keys */
 
 struct xdp_key_ethernet {
     __u8     eth_src[6];
@@ -47,17 +38,24 @@ struct xdp_key_ipv4 {
     __u8   ipv4_proto;
     __u8   ipv4_tos;
     __u8   ipv4_ttl;
-    // __u8   ipv4_frag;    /* One of OVS_FRAG_TYPE_*. */
+    __u8   ipv4_frag;    /* One of OVS_FRAG_TYPE_*. */
 };
 
 struct xdp_key_ipv6 {
-    __be32 ipv6_src[4];
-    __be32 ipv6_dst[4];
-    __be32 ipv6_label;    /* 20-bits in least-significant bits. */
+    union {
+        __be32 addr_b32[4];
+        __be64 addr_b64[2];
+    } ipv6_src;
+    union {
+        __be32 addr_b32[4];
+        __be64 addr_b64[2];
+    } ipv6_dst;
+    // __be32 ipv6_label;    /* 20-bits in least-significant bits. */
     __u8   ipv6_proto;
     __u8   ipv6_tclass;
     __u8   ipv6_hlimit;
-    // __u8   ipv6_frag;    /* One of OVS_FRAG_TYPE_*. */
+    __u8   ipv6_frag;    /* One of OVS_FRAG_TYPE_*. */
+    // __be32 pad;
 };
 
 struct xdp_key_tcp {
@@ -157,7 +155,10 @@ struct xdp_key_nsh_base {
 #define NSH_MD1_CONTEXT_SIZE 4
 
 struct xdp_key_nsh_md1 {
-    __be32 context[NSH_MD1_CONTEXT_SIZE];
+    union {
+        __be32 ctx_b32[NSH_MD1_CONTEXT_SIZE];
+        __be64 ctx_b64[NSH_MD1_CONTEXT_SIZE / 2];
+    } context;    
 };
 
 struct xdp_key_nsh_md2 {
@@ -165,85 +166,116 @@ struct xdp_key_nsh_md2 {
     __u8 type;
 };
 
-struct xdp_flow_key {
-    __u32 valid;
-    struct xdp_key_ethernet eth;
-    struct xdp_key_mpls mpls;
-    union {
-        struct xdp_key_ipv4 iph;
-        struct xdp_key_ipv6 ipv6h;
-        struct xdp_key_arp arph;
-        struct xdp_key_nsh_base nsh_base;
-    };
-    union {
-        struct xdp_key_tcp tcph;
-        struct xdp_key_udp udph;
-        struct xdp_key_icmp icmph;
-        struct xdp_key_icmpv6 icmp6h;
-        struct xdp_key_nsh_md1 nsh_md1;
-        struct xdp_key_nsh_md2 nsh_md2;
-    };
-    struct vlan_hdr *vlanh;
-    // struct pkt_metadata_t md;
+enum xdp_key_attr {
+    XDP_KEY_ATTR_UNSPEC,
+    XDP_KEY_ATTR_ENCAP,    /* Nested set of encapsulated attributes. */
+    XDP_KEY_ATTR_PRIORITY,  /* u32 skb->priority */
+    XDP_KEY_ATTR_IN_PORT,   /* u32 OVS dp port number */
+    XDP_KEY_ATTR_ETHERNET,  /* struct ovs_key_ethernet */
+    XDP_KEY_ATTR_VLAN,    /* be16 VLAN TCI */
+    XDP_KEY_ATTR_ETHERTYPE,    /* be16 Ethernet type */
+    XDP_KEY_ATTR_IPV4,      /* struct ovs_key_ipv4 */
+    XDP_KEY_ATTR_IPV6,      /* struct ovs_key_ipv6 */
+    XDP_KEY_ATTR_TCP,       /* struct ovs_key_tcp */
+    XDP_KEY_ATTR_UDP,       /* struct ovs_key_udp */
+    XDP_KEY_ATTR_ICMP,      /* struct ovs_key_icmp */
+    XDP_KEY_ATTR_ICMPV6,    /* struct ovs_key_icmpv6 */
+    XDP_KEY_ATTR_ARP,       /* struct ovs_key_arp */
+    XDP_KEY_ATTR_ND,        /* struct ovs_key_nd */
+    XDP_KEY_ATTR_SKB_MARK,  /* u32 skb mark */
+    XDP_KEY_ATTR_TUNNEL,    /* Nested set of ovs_tunnel attributes */
+    XDP_KEY_ATTR_SCTP,      /* struct ovs_key_sctp */
+    XDP_KEY_ATTR_TCP_FLAGS,    /* be16 TCP flags. */
+    XDP_KEY_ATTR_DP_HASH,   /* u32 hash value. Value 0 indicates the hash
+                   is not computed by the datapath. */
+    XDP_KEY_ATTR_RECIRC_ID, /* u32 recirc id */
+    XDP_KEY_ATTR_MPLS,      /* array of struct ovs_key_mpls.
+                 * The implementation may restrict
+                 * the accepted length of the array. */
+    XDP_KEY_ATTR_CT_STATE,    /* u32 bitmask of OVS_CS_F_* */
+    XDP_KEY_ATTR_CT_ZONE,    /* u16 connection tracking zone. */
+    XDP_KEY_ATTR_CT_MARK,    /* u32 connection tracking mark */
+    XDP_KEY_ATTR_CT_LABELS,    /* 16-octet connection tracking labels */
+    XDP_KEY_ATTR_CT_ORIG_TUPLE_IPV4,   /* struct ovs_key_ct_tuple_ipv4 */
+    XDP_KEY_ATTR_CT_ORIG_TUPLE_IPV6,   /* struct ovs_key_ct_tuple_ipv6 */
+    XDP_KEY_ATTR_NSH,       /* Nested set of ovs_nsh_key_* */
+
+#ifdef __KERNEL__
+    /* Only used within kernel data path. */
+    XDP_KEY_ATTR_TUNNEL_INFO,  /* struct ovs_tunnel_info */
+#endif
+
+#ifndef __KERNEL__
+    /* Only used within userspace data path. */
+    XDP_KEY_ATTR_PACKET_TYPE,  /* be32 packet type */
+#endif
+
+    __XDP_KEY_ATTR_MAX
 };
 
-#define MAX_UFID_LENGTH 16 /* 128 bits */
+/* Actions */
 
-struct xdp_flow_id {
-    __u32 ufid_len;
-    __u32 ufid[MAX_UFID_LENGTH / 4];
+struct xdp_action_trunc {
+    __u32 max_len; /* Max packet size in bytes. */
 };
 
-struct xdp_flow_stats {
-    __u64 packet_count;        /* Number of packets matched. */
-    __u64 byte_count;            /* Number of bytes matched. */
-    unsigned long used;        /* Last used time (in jiffies). */
-    __be16 tcp_flags;        /* Union of seen TCP flags. */
+/**
+ * struct ovs_action_push_mpls - %OVS_ACTION_ATTR_PUSH_MPLS action argument.
+ * @mpls_lse: MPLS label stack entry to push.
+ * @mpls_ethertype: Ethertype to set in the encapsulating ethernet frame.
+ *
+ * The only values @mpls_ethertype should ever be given are %ETH_P_MPLS_UC and
+ * %ETH_P_MPLS_MC, indicating MPLS unicast or multicast. Other are rejected.
+ */
+struct xdp_action_push_mpls {
+    __be32 mpls_lse;
+    __be16 mpls_ethertype; /* Either %ETH_P_MPLS_UC or %ETH_P_MPLS_MC */
 };
 
-#define MAX_XDP_ACTION_SIZE 24 /* 128 bits */
-
-struct xdp_flow_action {
-    __u8 type; /* Determine the type of attr - enum ovs_action_attr*/
-    __u8 len; /* len of the whole xdp_flow_action as a multiple of u8 */
-    __u8 data[MAX_XDP_ACTION_SIZE]; /* contains the attr, where data points at the start*/
+/**
+ * struct ovs_action_push_vlan - %OVS_ACTION_ATTR_PUSH_VLAN action argument.
+ * @vlan_tpid: Tag protocol identifier (TPID) to push.
+ * @vlan_tci: Tag control identifier (TCI) to push.  The CFI bit must be set
+ * (but it will not be set in the 802.1Q header that is pushed).
+ *
+ * The @vlan_tpid value is typically %ETH_P_8021Q or %ETH_P_8021AD.
+ * The only acceptable TPID values are those that the kernel module also parses
+ * as 802.1Q or 802.1AD headers, to prevent %OVS_ACTION_ATTR_PUSH_VLAN followed
+ * by %OVS_ACTION_ATTR_POP_VLAN from having surprising results.
+ */
+struct xdp_action_push_vlan {
+    __be16 vlan_tpid;    /* 802.1Q or 802.1ad TPID. */
+    __be16 vlan_tci;    /* 802.1Q TCI (VLAN ID and priority). */
 };
 
-#define MAX_ACTION_SIZE (MAX_XDP_ACTION_SIZE) * 4 /* We consider the maximum number of actions that can be applied to single flow */
-
-struct xdp_flow_actions {
-    __u8 len;
-    __u8 data[MAX_ACTION_SIZE];
+/* Data path hash algorithm for computing Datapath hash.
+ *
+ * The algorithm type only specifies the fields in a flow
+ * will be used as part of the hash. Each datapath is free
+ * to use its own hash algorithm. The hash value will be
+ * opaque to the user space daemon.
+ */
+enum xdp_hash_alg {
+    XDP_HASH_ALG_L4,
 };
 
-struct xdp_flow {
-    struct xdp_flow_key key;
-    // struct xdp_flow_id id;
-    struct xdp_flow_stats stats;
-    struct xdp_flow_actions actions;
+/*
+ * struct xdp_action_hash - %OVS_ACTION_ATTR_HASH action argument.
+ * @hash_alg: Algorithm used to compute hash prior to recirculation.
+ * @hash_basis: basis used for computing hash.
+ */
+struct xdp_action_hash {
+    __u32  hash_alg;     /* One of ovs_hash_alg. */
+    __u32  hash_basis;
 };
 
-/* NOTE: Adding the actions to the metadata was resulting stack limit when trying
- * to copy data. The per-cpu array was being recommended for that so went with that
- * design instead. TODO maybe to check the performance difference of reading an array
- * vs getting data from the *ctx. If there is a significant difference then might 
- * consider redisigning e.g, trying to add the actions to the flow_metadata instead of
- * the key*/
-struct flow_metadata {
-    __u8 type; // type of header, won't need this in current implentatiom it is always action attributes
-    __u8 len; // length of the 
-    __u8 pos; // the pos of the action attribute being processed
-    __u8 offset; // Multiple of __u8 from the position of data
-    struct xdp_flow_key key;
-};
-
-struct xdp_upcall {
-    __u8 type;
-    __u8 subtype;
-    __u32 ifindex;
-    __u32 pkt_len;
-    struct xdp_flow_key key;  
-    /* Follwed by pkt_len of packet data */
+/*
+ * struct xdp_action_push_eth - %OVS_ACTION_ATTR_PUSH_ETH action argument.
+ * @addresses: Source and destination MAC addresses.
+ * @eth_type: Ethernet type
+ */
+struct xdp_action_push_eth {
+    struct xdp_key_ethernet addresses;
 };
 
 enum xdp_action_attr {
@@ -287,6 +319,45 @@ struct xdp_len_tbl {
     const struct xdp_len_tbl *next;
 };
 
+// static int
+// odp_action_len(uint16_t type)
+// {
+//     if (type > OVS_ACTION_ATTR_MAX) {
+//         return -1;
+//     }
+
+//     switch ((enum ovs_action_attr) type) {
+//     case OVS_ACTION_ATTR_OUTPUT: return sizeof(uint32_t);
+//     case OVS_ACTION_ATTR_TRUNC: return sizeof(struct ovs_action_trunc);
+//     case OVS_ACTION_ATTR_TUNNEL_PUSH: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_TUNNEL_POP: return sizeof(uint32_t);
+//     case OVS_ACTION_ATTR_METER: return sizeof(uint32_t);
+//     case OVS_ACTION_ATTR_USERSPACE: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_PUSH_VLAN: return sizeof(struct ovs_action_push_vlan);
+//     case OVS_ACTION_ATTR_POP_VLAN: return 0;
+//     case OVS_ACTION_ATTR_PUSH_MPLS: return sizeof(struct ovs_action_push_mpls);
+//     case OVS_ACTION_ATTR_POP_MPLS: return sizeof(ovs_be16);
+//     case OVS_ACTION_ATTR_RECIRC: return sizeof(uint32_t);
+//     case OVS_ACTION_ATTR_HASH: return sizeof(struct ovs_action_hash);
+//     case OVS_ACTION_ATTR_SET: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_SET_MASKED: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_SAMPLE: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_CT: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_CT_CLEAR: return 0;
+//     case OVS_ACTION_ATTR_PUSH_ETH: return sizeof(struct ovs_action_push_eth);
+//     case OVS_ACTION_ATTR_POP_ETH: return 0;
+//     case OVS_ACTION_ATTR_CLONE: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_PUSH_NSH: return ATTR_LEN_VARIABLE;
+//     case OVS_ACTION_ATTR_POP_NSH: return 0;
+
+//     case OVS_ACTION_ATTR_UNSPEC:
+//     case __OVS_ACTION_ATTR_MAX:
+//         return ATTR_LEN_INVALID;
+//     }
+
+//     return ATTR_LEN_INVALID;
+// }
+
 static const struct xdp_len_tbl
 xdp_action_attr_list[TAIL_TABLE_SIZE] = {
     [XDP_ACTION_ATTR_UNSPEC] = { .name = "OVS_ACTION_ATTR_UNSPEC"},
@@ -311,6 +382,127 @@ xdp_action_attr_list[TAIL_TABLE_SIZE] = {
     [XDP_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER"},
     [XDP_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE"},
     [XDP_ACTION_ATTR_UPCALL] = { .name = "OVS_ACTION_ATTR_UPCALL" }
+};
+
+/* NOTE: In modern compilers, data structures are aligned by default to access memory 
+ * efficiently. Structure members are aligned to memory address that multiples their 
+ * size, and padding is added for the proper alignment. Because of this, the size of 
+ * struct may often grow larger than expected. 
+ * 
+ * The BPF verifier in the kernel checks the stack boundary that a BPF program does not
+ * access outside of boundary or uninitialized stack area. Using struct with the padding
+ * as a map value, will cause invalid indirect read from stack failure on bpf_prog_load().
+ * ref: https://docs.cilium.io/en/v1.7/bpf/ 
+ * 
+ * Therefore for safe operations we are going to use buffers for storing and manipulating
+ * these structs. The struct pointer will point to the buffer. The buffer will have a padded
+ * size. Without this was getting some inconsistency when reading a point to a struct across
+ * differnt functions WITHOUT the use of buffers. */
+#define DIFF_LOWER_PAD(LEN, POW)         \
+    (int)(LEN -  ((LEN >> POW) << POW))
+
+#define DIFF_UPPER_PAD(LEN, POW)         \
+    (int) ((1 << POW) - DIFF_LOWER_PAD(LEN, POW)) % (1 << POW)
+
+#define PADDED_LEN_u64(LEN)             \
+    (int) (LEN + DIFF_UPPER_PAD(LEN, 3))
+
+#define PADDED_LEN_u32(LEN)             \
+    (int) (LEN + DIFF_UPPER_PAD(LEN, 2))
+
+#define PADDED_LEN_u16(LEN)             \
+    (int) (LEN + DIFF_UPPER_PAD(LEN, 1))
+
+struct xdp_flow_key {
+    __u32 valid;
+    struct xdp_key_ethernet eth;
+    struct xdp_key_mpls mpls;
+    union {
+        struct xdp_key_ipv4 iph;
+        struct xdp_key_ipv6 ipv6h;
+        struct xdp_key_arp arph;
+        struct xdp_key_nsh_base nsh_base;
+    };
+    union {
+        struct xdp_key_tcp tcph;
+        struct xdp_key_udp udph;
+        struct xdp_key_icmp icmph;
+        struct xdp_key_icmpv6 icmp6h;
+        struct xdp_key_nsh_md1 nsh_md1;
+        struct xdp_key_nsh_md2 nsh_md2;
+    };
+    struct vlan_hdr *vlanh;
+};
+
+#define XDP_FLOW_KEY_LEN_u64 PADDED_LEN_u64(sizeof(struct xdp_flow_key))
+
+#define MAX_UFID_LENGTH 16 /* 128 bits */
+
+struct xdp_flow_id {
+    __u32 ufid_len;
+    __u32 ufid[MAX_UFID_LENGTH / 4];
+};
+
+#define XDP_FLOW_ID_LEN_u64 PADDED_LEN_u64(sizeof(struct xdp_flow_id))
+
+struct xdp_flow_stats {
+    __u64 packet_count;        /* Number of packets matched. */
+    __u64 byte_count;            /* Number of bytes matched. */
+    unsigned long used;        /* Last used time (in jiffies). */
+    __be16 tcp_flags;        /* Union of seen TCP flags. */
+};
+
+#define XDP_FLOW_STATS_LEN_u64 PADDED_LEN_u64(sizeof(struct xdp_flow_stats))
+
+#define MAX_XDP_ACTION_SIZE 24 /* 128 bits */
+
+struct xdp_flow_action {
+    __u8 type; /* Determine the type of attr - enum ovs_action_attr*/
+    __u8 len; /* len of the whole xdp_flow_action as a multiple of u8 */
+    __u8 data[MAX_XDP_ACTION_SIZE]; /* contains the attr, where data points at the start*/
+};
+
+#define MAX_ACTION_SIZE (MAX_XDP_ACTION_SIZE) * 4 /* We consider the maximum number of actions that can be applied to single flow */
+
+struct xdp_flow_actions {
+    __u8 len;
+    __u8 data[MAX_ACTION_SIZE];
+};
+
+#define XDP_FLOW_ACTIONS_LEN_u64 PADDED_LEN_u64(sizeof(struct xdp_flow_actions))
+
+struct xdp_flow {
+    struct xdp_flow_key key;
+    // struct xdp_flow_id id;
+    struct xdp_flow_stats stats;
+    struct xdp_flow_actions actions;
+};
+
+#define XDP_FLOW_LEN_u64 PADDED_LEN_u64(sizeof(struct xdp_flow))
+
+/* NOTE: Adding the actions to the metadata was resulting stack limit when trying
+ * to copy data. The per-cpu array was being recommended for that so went with that
+ * design instead. TODO maybe to check the performance difference of reading an array
+ * vs getting data from the *ctx. If there is a significant difference then might 
+ * consider redisigning e.g, trying to add the actions to the flow_metadata instead of
+ * the key*/
+struct flow_metadata {
+    __u8 type; // type of header, won't need this in current implentatiom it is always action attributes
+    __u8 len; // length of the 
+    __u8 pos; // the pos of the action attribute being processed
+    __u8 offset; // Multiple of __u8 from the position of data
+    struct xdp_flow_key key;
+};
+
+#define XDP_FLOW_METADATA_KEY_LEN_u64 PADDED_LEN_u64(sizeof(struct flow_metadata))
+
+struct xdp_upcall {
+    __u8 type;
+    __u8 subtype;
+    __u32 ifindex;
+    __u32 pkt_len;
+    struct xdp_flow_key key;  
+    /* Follwed by pkt_len of packet data */
 };
 
 enum sw_flow_mac_proto {

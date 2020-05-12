@@ -221,6 +221,8 @@ $(info "================ RUNNING =======================")
 # 	xdp/flow-table.h \
 # 	xdp/loader.c \
 # 	xdp/loader.h
+bin_PROGRAMS += xdp/xdp_logger
+xdp_xdp_logger_SOURCES = xdp/xdp_logger.c
 
 lib_LTLIBRARIES += xdp/libxdp.la
 xdp_libxdp_la_SOURCES =
@@ -282,9 +284,11 @@ $(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
 EXTRA_DIST += \
 	xdp/README \
 	xdp/nsh.h \
+	xdp/parsing_xdp_key_helpers.h \
 	xdp/parsing_helpers.h \
 	xdp/rewrite_helpers.h \
 	xdp/tail_actions.h \
+	xdp/xdp_helpers.h \
 	$(XDP_C)
 
 dist_xdp_DATA += \
