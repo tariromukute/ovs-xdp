@@ -1218,6 +1218,7 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
     if (error) {
         goto out;
     }
+    VLOG_INFO("--- Successfully loaded xdp program ---");
     /* check if port has been configure on an already existing ep */
     ep = dp_xdp_get_ep(dp, xdp_ep.ep_id);
     if (!ep) {

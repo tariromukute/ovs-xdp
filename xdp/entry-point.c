@@ -20,19 +20,13 @@ static inline int key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_
 {
 
     int nh_type;
-    // struct xdp_flow_key key;
-    // memset(&key, 0, sizeof(struct xdp_flow_key));
-    struct xdp_key_ethernet *eth; // = &key->eth;
+    struct xdp_key_ethernet *eth;
     nh_type = parse_xdp_key_ethhdr(nh, data_end, &eth);
     if (nh_type < 0)
     {
-        bpf_printk("error");
         goto out;
     }
     memcpy(&key->eth, eth, sizeof(key->eth));
-    bpf_printk("key_extract: %llu\n", ether_addr_to_u64(key->eth.eth_dst));
-    // bpf_printk("key_extract: %llu\n", ether_addr_to_u64(key->eth.eth_src));
-    /* Network layer. */
     if (nh_type == ETH_P_IP)
     {
         struct xdp_key_ipv4 *iph;
@@ -150,7 +144,6 @@ static inline int key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_
         }
         else if (nh_type == IPPROTO_ICMPV6)
         {
-            bpf_printk("IPPROTO_ICMPV6: %llu\n", ether_addr_to_u64(key->eth.eth_dst));
             struct xdp_key_icmpv6 *icmp6h;
             nh_type = parse_xdp_key_icmp6hdr(nh, data_end, &icmp6h);
             if (nh_type < 0)
@@ -159,7 +152,6 @@ static inline int key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_
             }
 
             memcpy(&key->icmp6h, icmp6h, sizeof(struct xdp_key_icmpv6));
-            bpf_printk("-- IPPROTO_ICMPV6 memcpy: %llu %u %u\n", ether_addr_to_u64(key->eth.eth_dst), icmp6h->icmpv6_type, key->icmp6h.icmpv6_type);
         }
     }
     else if (nh_type == ETH_P_NSH)
@@ -196,13 +188,6 @@ static inline int key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_
             // memcpy(&key->nsh_md2, md2h, sizeof(struct xdp_key_nsh_md2));
         }
     }
-    bpf_printk("key extract end 1: %llu\n", ether_addr_to_u64(key->eth.eth_dst));
-    // bpf_printk("key extract end 1: %llu\n", ether_addr_to_u64(key->eth.eth_src));
-    // bpf_printk("Key 1: %llu\n", ether_addr_to_u64(key->eth.h_dest));
-    // bpf_printk("Key 2: %llu\n", ether_addr_to_u64(key->eth.h_source));
-    // key->valid = 1;
-    // *keyp = &key;
-    bpf_printk("key extract end 2: %llu\n", ether_addr_to_u64(key->eth.eth_dst));
     return 0;
 out:
     return -1;
@@ -229,8 +214,6 @@ int xdp_process(struct xdp_md *ctx)
     {
         goto out;
     }
-
-    
 
     flow = bpf_map_lookup_elem(&flow_table, keybuf);
     if (!flow)

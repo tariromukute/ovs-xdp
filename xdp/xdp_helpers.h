@@ -8,17 +8,17 @@
 
 /* Header cursor to keep track of current parsing position */
 struct hdr_cursor {
-	void *pos;
+    void *pos;
 };
 
 /*
- * 	struct vlan_hdr - vlan header
- * 	@h_vlan_TCI: priority and VLAN ID
- *	@h_vlan_encapsulated_proto: packet type ID or len
+ *     struct vlan_hdr - vlan header
+ *     @h_vlan_TCI: priority and VLAN ID
+ *    @h_vlan_encapsulated_proto: packet type ID or len
  */
 struct vlan_hdr {
-	__be16	h_vlan_TCI;
-	__be16	h_vlan_encapsulated_proto;
+    __be16    h_vlan_TCI;
+    __be16    h_vlan_encapsulated_proto;
 };
 
 /*
@@ -26,24 +26,26 @@ struct vlan_hdr {
  * structures.
  */
 struct icmphdr_common {
-	__u8		type;
-	__u8		code;
-	__sum16		cksum;
+    __u8        type;
+    __u8        code;
+    __sum16        cksum;
 };
 
 struct arp_ethhdr {
-	__be16      ar_hrd;	/* format of hardware address   */
-	__be16      ar_pro;	/* format of protocol address   */
-	__u8        ar_hln;	/* length of hardware address   */
-	__u8        ar_pln;	/* length of protocol address   */
-	__be16      ar_op;	/* ARP opcode (command)     */
+    __be16      ar_hrd;    /* format of hardware address   */
+    __be16      ar_pro;    /* format of protocol address   */
+    __u8        ar_hln;    /* length of hardware address   */
+    __u8        ar_pln;    /* length of protocol address   */
+    __be16      ar_op;    /* ARP opcode (command)     */
 
-	/* Ethernet+IPv4 specific members. */
-	__u8       ar_sha[ETH_ALEN];	/* sender hardware address  */
-	__be32              ar_sip;		/* sender IP address        */
-	__u8       ar_tha[ETH_ALEN];	/* target hardware address  */
-	__be32              ar_tip;		/* target IP address        */
-};
+    /* Ethernet+IPv4 specific members. */
+    __u8       ar_sha[ETH_ALEN];    /* sender hardware address  */
+    __be32              ar_sip;        /* sender IP address        */
+    __u8       ar_tha[ETH_ALEN];    /* target hardware address  */
+    __be32              ar_tip;        /* target IP address        */
+} __attribute__((packed)); /* NOTE: We need to get the absolute size of the struct when reading the data 
+                            * from the xdp_md. The is the last packet hence we can't handle a length that
+                            * goes over bound cause of padding. */
 
 /* Allow users of header file to redefine VLAN max depth */
 #ifndef VLAN_MAX_DEPTH
