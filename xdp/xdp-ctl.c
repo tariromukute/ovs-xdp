@@ -12,7 +12,7 @@
 static struct global_flags flags = {
     .verbose = 0};
 
-static struct command main_cmds[] = {
+struct command main_cmds[] = {
     {"dp", "dps [command]", dp_cmd},
     {"flow", "flows [command]", flow_cmd},
     {"port", "ports [command]", port_cmd},
@@ -20,17 +20,16 @@ static struct command main_cmds[] = {
     {0, 0, 0}
 };
 
-struct option_wrapper wrappers[] = {
-    {{"help", no_argument, 0, 'h'}, "Show help", ""},
-    {{"verbose", no_argument, 0, 'v'}, "Show all information messages", ""},
-    {{0, 0, 0, 0}, "", ""}};
-
 int main(int argc, char **argv)
 {
     char *description = "Manage xdp datapath and flows";
     char *use = "xdp-ctl [command]";
     int error = EAGAIN;
     int c;
+    struct option_wrapper wrappers[] = {
+    {{"help", no_argument, 0, 'h'}, "Show help", ""},
+    {{"verbose", no_argument, 0, 'v'}, "Show all information messages", ""},
+    {{0, 0, 0, 0}, "", ""}};
     struct option *long_options;
 
     if (option_wrappers_to_optionsx(wrappers, &long_options))
@@ -56,7 +55,9 @@ int main(int argc, char **argv)
         case 'v':
             flags.verbose = 1;
             break;
-
+        case 'h':
+            error = EAGAIN;
+            goto out;
         case '?':
             error = EINVAL;
             goto out;
@@ -66,6 +67,9 @@ int main(int argc, char **argv)
         }
     }
 
+    if (argc <= 1)
+        goto out;
+        
     struct command *cmd;
     for (cmd = main_cmds; cmd->name != NULL; cmd++)
     {

@@ -11,7 +11,6 @@
 
 int flow_cmd(int argc, char **argv, void *params)
 {
-    printf("%s \n", __func__);
     char *description = "Manage flows";
     char *use = "xdp-ctl flow [command]";
     int error = 1;
@@ -50,6 +49,7 @@ struct flow_arguments
 };
 
 struct option_wrapper list_flows_options[] = {
+    {{"help", no_argument, 0, 'h'}, "Show help", ""},
     {{"dp", required_argument, 0, 'd'}, "Show flows install on datapath", ""},
     {{"ifname", required_argument, 0, 'i'}, "Show flows install on a specific interface", ""},
     {{"file", required_argument, 0, 'f'}, "File to output or read flows", ""},
@@ -85,6 +85,9 @@ static int parse_list_flows_options(int argc, char **argv, struct flow_arguments
         
         switch (c)
         {
+        case 'h':
+            error = EINVAL;
+            goto out;
         case 'd':
             strcpy(args->dp_name, optarg);
             break;
@@ -196,8 +199,9 @@ print:
     }
 
 out:
-    if (error == EINVAL)
+    if (error == EINVAL) {
         print_cmd_usage(description, use, NULL, list_flows_options);
+    }
     return error;
 }
 

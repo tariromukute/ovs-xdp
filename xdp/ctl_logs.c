@@ -443,6 +443,7 @@ struct log_level
 };
 
 struct option_wrapper list_logs_options[] = {
+    {{"help", no_argument, 0, 'h'}, "Show help", ""},
     {{"all", no_argument, 0, 'a'}, "Show all logs", ""},
     {{"info", no_argument, 0, 'i'}, "Show information logs", ""},
     {{"debug", no_argument, 0, 'd'}, "Show debug logs", ""},
@@ -480,6 +481,9 @@ static int parse_list_logs_options(int argc, char **argv, struct log_level *leve
         printf("\n");
         switch (c)
         {
+        case 'h':
+            error = EINVAL;
+            goto out;
         case 'd':
             level->debug = 1;
             cnt++;
