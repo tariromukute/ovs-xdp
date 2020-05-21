@@ -485,7 +485,7 @@ struct xdp_flow {
  * design instead. TODO maybe to check the performance difference of reading an array
  * vs getting data from the *ctx. If there is a significant difference then might 
  * consider redisigning e.g, trying to add the actions to the flow_metadata instead of
- * the key*/
+ * the key */
 struct flow_metadata {
     __u8 type; // type of header, won't need this in current implentatiom it is always action attributes
     __u8 len; // length of the 

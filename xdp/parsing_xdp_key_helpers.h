@@ -30,7 +30,7 @@
 #include <linux/tcp.h>
 #include "nsh.h"
 #include "flow.h"
-#include "xdp_helpers.h"
+#include "xdp_kern_helpers.h"
 
 /* Notice, parse_ethhdr() will skip VLAN tags, by advancing nh->pos and returns
  * next header EtherType, BUT the ethhdr pointer supplied still points to the

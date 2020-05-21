@@ -34,7 +34,14 @@ struct bpf_map_def SEC("maps") percpu_actions = {
 struct bpf_map_def SEC("maps") flow_table = {
     .type = BPF_MAP_TYPE_HASH,
     .key_size = XDP_FLOW_KEY_LEN_u64,
-    .value_size = XDP_FLOW_LEN_u64,
+    .value_size = XDP_FLOW_ACTIONS_LEN_u64,
+    .max_entries = 100,
+};
+
+struct bpf_map_def SEC("maps") flow_stats_table = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = XDP_FLOW_KEY_LEN_u64,
+    .value_size = XDP_FLOW_STATS_LEN_u64,
     .max_entries = 100,
 };
 

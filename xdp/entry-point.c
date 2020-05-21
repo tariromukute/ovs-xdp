@@ -14,7 +14,7 @@
 #include "parsing_xdp_key_helpers.h"
 #include "parsing_helpers.h"
 #include "rewrite_helpers.h"
-#include "xdp_helpers.h"
+#include "xdp_kern_helpers.h"
 
 static inline int key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_flow_key *key)
 {

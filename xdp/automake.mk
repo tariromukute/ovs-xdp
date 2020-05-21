@@ -224,6 +224,22 @@ $(info "================ RUNNING =======================")
 bin_PROGRAMS += xdp/xdp_logger
 xdp_xdp_logger_SOURCES = xdp/xdp_logger.c
 
+bin_PROGRAMS += xdp/xdp-ctl
+
+xdp_xdp_ctl_SOURCES = \
+	xdp/command.h \
+	xdp/xdp-ctl.c \
+	xdp/ctl_datapath.c \
+	xdp/ctl_datapath.h \
+	xdp/ctl_flow.c \
+	xdp/ctl_flow.h \
+	xdp/ctl_logs.c \
+	xdp/ctl_logs.h \
+	xdp/ctl_port.c \
+	xdp/ctl_port.h
+
+xdp_xdp_ctl_LDADD = xdp/libxdpuser.la
+
 lib_LTLIBRARIES += xdp/libxdp.la
 xdp_libxdp_la_SOURCES =
 
@@ -232,9 +248,10 @@ xdp_libxdp_la_LIBADD = \
     xdp/actions.o \
     xdp/entry-point.o
 
-noinst_LTLIBRARIES += xdp/libxdpuser.la
+lib_LTLIBRARIES += xdp/libxdpuser.la
 
 xdp_libxdpuser_la_SOURCES = \
+	xdp/xdp_user_helpers.h \
     xdp/datapath.c \
 	xdp/datapath.h \
     xdp/flow-table.c \
@@ -243,6 +260,8 @@ xdp_libxdpuser_la_SOURCES = \
 	xdp/flow.h \
     xdp/loader.c \
 	xdp/loader.h
+
+xdp_libxdpuser_la_LIBADD = $(LIBBPF_LDADD)
 
 xdp_libxdpuser_la_LDFLAGS = \
         $(OVS_LTINFO) \
@@ -288,7 +307,7 @@ EXTRA_DIST += \
 	xdp/parsing_helpers.h \
 	xdp/rewrite_helpers.h \
 	xdp/tail_actions.h \
-	xdp/xdp_helpers.h \
+	xdp/xdp_kern_helpers.h \
 	$(XDP_C)
 
 dist_xdp_DATA += \

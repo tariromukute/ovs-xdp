@@ -11,8 +11,8 @@
 #include "flow.h"
 #include "flow-table.h"
 
-struct datapath {
-
+struct xdp_datapath {
+    char *name;
 };
 
 struct xdp_ep_stats {
@@ -64,36 +64,36 @@ struct dp_downcall_info {
     __u16 mru;
 };
 
-int xdp_dp_downcall(struct datapath *, const struct xdp_flow_key *,
+int xdp_dp_downcall(struct xdp_datapath *, const struct xdp_flow_key *,
             const struct dp_downcall_info *);
 
-const char *xdp_dp_name(const struct datapath *dp);
+const char *xdp_dp_name(const struct xdp_datapath *dp);
 
 /* datapath crud */
 int
-xdp_dp_create(struct datapath *dp);
+xdp_dp_create(struct xdp_datapath *dp);
 
 int
-xdp_dp_update(struct datapath *dp);
+xdp_dp_update(struct xdp_datapath *dp);
 
 int
-xdp_dp_delete(struct datapath *dp);
+xdp_dp_delete(struct xdp_datapath *dp);
 
 int
-xdp_dp_fetch(struct datapath *dp);
+xdp_dp_fetch(struct xdp_datapath *dp);
 
 /* datapath port actions */
 int
-xdp_dp_port_add(struct datapath *dp, struct xport *xport);
+xdp_dp_port_add(struct xdp_datapath *dp, struct xport *xport);
 
 int
-xdp_dp_port_del(struct datapath *dp, struct xport *xport);
+xdp_dp_port_del(struct xdp_datapath *dp, struct xport *xport);
 
 int
-xdp_dp_port_lookup(struct datapath *dp, struct xport *xport);
+xdp_dp_port_lookup(struct xdp_datapath *dp, struct xport *xport);
 
 int
-xdp_dp_port_next(struct datapath *dp, struct xport *xport);
+xdp_dp_port_next(struct xdp_datapath *dp, struct xport *xport);
 
 /* entry point flows */
 int
@@ -111,21 +111,67 @@ xdp_ep_flow_remove(int map_fd, struct xdp_flow_key *key);
 int
 xdp_ep_flow_flush(int map_fd);
 
+/* entry point flow stats */
+int
+xdp_ep_flow_stats_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_ep_flow_stats_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_ep_flow_stats_flush(int map_fd);
+
+/* interface flows */
+int
+xdp_if_flow_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_if_flow_insert(int if_index, struct xdp_flow *flow);
+
+int
+xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_if_flow_remove(int if_index, struct xdp_flow_key *key);
+
+int
+xdp_if_flow_flush(int if_index);
+
+/* interface flow stats */
+int
+xdp_if_flow_stats_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_if_flow_stats_next(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_if_flow_stats_flush(int if_index);
+
 /* datapath flows */
 int
-xdp_dp_flow_lookup(struct datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_dp_flow_lookup(struct xdp_datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
 
 int
-xdp_dp_flow_insert(struct datapath *dp, struct xdp_flow *flow);
+xdp_dp_flow_insert(struct xdp_datapath *dp, struct xdp_flow *flow);
 
 int
-xdp_dp_flow_next(struct datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_dp_flow_next(struct xdp_datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
 
 int
-xdp_dp_flow_remove(struct datapath *dp, struct xdp_flow_key *key);
+xdp_dp_flow_remove(struct xdp_datapath *dp, struct xdp_flow_key *key);
 
 int
-xdp_dp_flow_flush(struct datapath *dp, struct xdp_flow_key *key);
+xdp_dp_flow_flush(struct xdp_datapath *dp, struct xdp_flow_key *key);
+
+/* datapath flow stats */
+int
+xdp_dp_flow_stats_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_dp_flow_stats_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+
+int
+xdp_dp_flow_stats_flush(int map_fd);
 
 
 
