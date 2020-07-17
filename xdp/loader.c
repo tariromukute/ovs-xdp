@@ -157,7 +157,7 @@ int xsk_sock_create(struct xsk_socket_info **sockp, const char *ifname)
     cfg.ifindex = if_nametoindex(cfg.ifname);
     struct rlimit rlim = {RLIM_INFINITY, RLIM_INFINITY};
     struct xsk_umem_info *umem;
-    VLOG_INFO("---- Called: %s 1----", __func__);/* Allow unlimited locking of memory, so all memory needed for packet
+    /* Allow unlimited locking of memory, so all memory needed for packet
     * buffers can be locked.
     */
     if (setrlimit(RLIMIT_MEMLOCK, &rlim)) {
@@ -172,21 +172,18 @@ int xsk_sock_create(struct xsk_socket_info **sockp, const char *ifname)
         VLOG_INFO("ERROR: Can't allocate buffer memory");
         return EXIT_FAIL;
     }
-
     /* Initialize shared packet_buffer for umem usage */
     umem = configure_xsk_umem(packet_buffer, packet_buffer_size);
     if (umem == NULL) {
         VLOG_INFO("ERROR: Can't create umem");
         return EXIT_FAIL;
     }
-
     /* Open and configure the AF_XDP (xsk) socket */
     sock = xsk_configure_socket(&cfg, umem);
     if (sock == NULL) {
         VLOG_INFO("ERROR: Can't setup AF_XDP socket");
         return EXIT_FAIL;
     }
-
     *sockp = sock;
     return 0;
 }
@@ -513,7 +510,6 @@ static int pinned_map_by_name(struct config *cfg, const char *name)
     }
 
     int fd = bpf_obj_get(buf);
-
     return fd;
 }
 

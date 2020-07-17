@@ -140,7 +140,7 @@ static void __always_inline log_flow_key(struct xdp_flow_key *key)
         bpf_printk("line: xdp_key_arp: arp_sha: %llu arp_tha: %llu arp_op: %u \n",
                     u8_arr_to_u64(key->arph.arp_sha, ETH_ALEN),
                     u8_arr_to_u64(key->arph.arp_tha, ETH_ALEN),
-                    bpf_ntohs(key->arph.arp_op));
+                    bpf_ntohs(key->arph.ar_op));
 
         bpf_printk("xdp_key_arp: arp_sip: %lu arp_tip: %lu :line\n",
                     key->arph.arp_sip,

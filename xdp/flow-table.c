@@ -76,26 +76,28 @@ int xdp_flow_map_num_masks(int map_fd)
 
 int xdp_flow_map_next_key(int map_fd, __u8 ckey_buf[], __u8 nkey_buf[])
 {
+    printf("-- func %s --\n", __func__);
     int error = 0;
 
     error = bpf_map_get_next_key(map_fd, ckey_buf, nkey_buf);
     if (error) {
+        printf("error %d errno %d-- xdp_flow_map_next_key\n", error, errno);
         if (errno == ENOENT)
             error = ENOENT;
     }
-
+    printf("-- func %s -- end \n", __func__);
     return error;
 }
 
-int xdp_flow_map_lookup(int map_fd, const __u8 key_buf[], struct xdp_flow_actions *actions)
+int xdp_flow_map_lookup(int map_fd, const __u8 key_buf[], __u8 act_buf[])
 {
     int error = 0;
-    actions = NULL;
 
-    error = bpf_map_lookup_elem(map_fd, key_buf, actions);
+    error = bpf_map_lookup_elem(map_fd, key_buf, act_buf);
     if (error) {
-        // printf("Error looking up actions\n");
+        printf("Error looking up actions\n");
     }
+    printf("-- func %s --\n", __func__);
     return error;
 }
 

@@ -64,6 +64,8 @@ struct dp_downcall_info {
     __u16 mru;
 };
 
+/* TODO: need to convert some of the arg in this file to pointer of pointer */
+
 int xdp_dp_downcall(struct xdp_datapath *, const struct xdp_flow_key *,
             const struct dp_downcall_info *);
 
@@ -103,7 +105,7 @@ int
 xdp_ep_flow_insert(int map_fd, struct xdp_flow *flow);
 
 int
-xdp_ep_flow_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_ep_flow_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow **flowp);
 
 int
 xdp_ep_flow_remove(int map_fd, struct xdp_flow_key *key);
@@ -129,7 +131,7 @@ int
 xdp_if_flow_insert(int if_index, struct xdp_flow *flow);
 
 int
-xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow **flowp);
 
 int
 xdp_if_flow_remove(int if_index, struct xdp_flow_key *key);
@@ -155,7 +157,7 @@ int
 xdp_dp_flow_insert(struct xdp_datapath *dp, struct xdp_flow *flow);
 
 int
-xdp_dp_flow_next(struct xdp_datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_dp_flow_next(struct xdp_datapath *dp, struct xdp_flow_key *key, struct xdp_flow **flowp);
 
 int
 xdp_dp_flow_remove(struct xdp_datapath *dp, struct xdp_flow_key *key);

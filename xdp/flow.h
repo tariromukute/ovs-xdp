@@ -20,6 +20,20 @@ enum xdp_packet_cmd {
     XDP_PACKET_CMD_EXECUTE  /* Apply actions to a packet. */
 };
 
+enum proto_valid {
+    ETHER_VALID = 1 << 0,
+    MPLS_VALID = 1 << 1,
+    IPV4_VALID = 1 << 2,
+    IPV6_VALID = 1 << 3,
+    ARP_VALID = 1 << 4,
+    TCP_VALID = 1 << 5,
+    UDP_VALID = 1 << 6,
+    ICMP_VALID = 1 << 7,
+    VLAN_VALID = 1 << 8,
+    CVLAN_VALID = 1 << 9,
+    ICMPV6_VALID = 1 << 10,
+};
+
 /* Keys */
 
 struct xdp_key_ethernet {
@@ -86,7 +100,7 @@ struct xdp_key_icmpv6 {
 struct xdp_key_arp {
     __be32 arp_sip;
     __be32 arp_tip;
-    __be16 arp_op;
+    __be16 ar_op;
     __u8   arp_sha[6];
     __u8   arp_tha[6];
 };

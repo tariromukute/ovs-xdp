@@ -19,7 +19,7 @@ int xdp_flow_map_insert(int map_fd, __u8 key_buf[], struct xdp_flow_actions *act
 int xdp_flow_map_remove(int map_fd, __u8 key_buf[]);
 int xdp_flow_map_num_masks(int map_fd);
 int xdp_flow_map_next_key(int map_fd, __u8 ckey_buf[], __u8 nkey_buf[]);
-int xdp_flow_map_lookup(int map_fd, const __u8 key_buf[], struct xdp_flow_actions *actions);
+int xdp_flow_map_lookup(int map_fd, const __u8 key_buf[], __u8 act_buf[]);
 struct xdp_flow_actions *xdp_flow_map_lookup_ufid(int map_fd, const struct xdp_flow_id *);
 
 int xdp_flow_stats_map_lookup(int map_fd, const __u8 key_buf[], struct xdp_flow_stats *stats);

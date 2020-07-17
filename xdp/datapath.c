@@ -99,14 +99,16 @@ int xdp_dp_port_next(struct xdp_datapath *dp, struct xport *xport)
 int xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow)
 {
     int err = 0;
+    __u8 act_buf[XDP_FLOW_ACTIONS_LEN_u64] = { 0 };
     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
-    memcpy(key_buf, &flow->key, sizeof(flow->key));
+    memcpy(key_buf, key, sizeof(flow->key));
 
-    err = xdp_flow_map_lookup(map_fd, key_buf, &flow->actions);
+    err = xdp_flow_map_lookup(map_fd, key_buf, act_buf);
     if (err) {
         /* TODO: check error and return code */
         goto out;
     }
+    memcpy(&flow->actions, act_buf, sizeof(struct xdp_flow_action));
 
 out:
     return err;
@@ -129,10 +131,15 @@ out:
 }
 
 /* TODO: think need pointer to a pointer here for key */
-int xdp_ep_flow_next(int map_fd, struct xdp_flow_key *pkey, struct xdp_flow *flow)
+int xdp_ep_flow_next(int map_fd, struct xdp_flow_key *pkey, struct xdp_flow **flowp)
 {
     printf("%s \n", __func__);
+    struct xdp_flow flow;
+    memset(&flow, 0, sizeof(struct xdp_flow));
+
+    __u8 zero_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
+    
     if (pkey)
         memcpy(key_buf, pkey, sizeof(*pkey));
     int err = 0;
@@ -144,13 +151,17 @@ int xdp_ep_flow_next(int map_fd, struct xdp_flow_key *pkey, struct xdp_flow *flo
         /* TODO: check error and return code */
         goto out;
     }
-    memcpy(&flow->key, nkey_buf, sizeof(struct xdp_flow_key));
 
-    err = xdp_flow_map_lookup(map_fd, nkey_buf, &flow->actions);
+    memcpy(&flow.key, nkey_buf, sizeof(struct xdp_flow_key));
+
+    __u8 act_buf[XDP_FLOW_ACTIONS_LEN_u64] = { 0 };
+    err = xdp_flow_map_lookup(map_fd, nkey_buf, act_buf);
     if (err) {
         /* TODO: check error and return code */
         goto out;
     }
+    memcpy(&flow.actions, act_buf, sizeof(struct xdp_flow_actions));
+    *flowp = &flow;
 
 out:
     return err;
@@ -309,7 +320,7 @@ out:
 }
 
 int
-xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow)
+xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow **flowp)
 {
     printf("%s \n", __func__);
     int err = 0;
@@ -335,7 +346,7 @@ xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow)
     }
 
 
-    err = xdp_ep_flow_next(map_fd, key, flow);
+    err = xdp_ep_flow_next(map_fd, key, flowp);
 
 out:
     return err;
@@ -498,7 +509,7 @@ int xdp_dp_flow_insert(struct xdp_datapath *dp, struct xdp_flow *flow)
     return err;
 }
 
-int xdp_dp_flow_next(struct xdp_datapath *dp, struct xdp_flow_key *key, struct xdp_flow *flow)
+int xdp_dp_flow_next(struct xdp_datapath *dp, struct xdp_flow_key *key, struct xdp_flow **flowp)
 {
     int err = ENOENT;
 

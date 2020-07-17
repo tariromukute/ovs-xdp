@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <netinet/ether.h>
 
 #include "bitmap.h"
 #include "cmap.h"
@@ -3780,10 +3781,22 @@ dpif_netdev_flow_dump_next(struct dpif_flow_dump_thread *thread_,
     return n_flows;
 }
 
+static __u64 u8_arr_to_u64(const __u8 *addr, const int size)
+{
+    __u64 u = 0;
+    int i;
+    for (i = size; i >= 0; i--)
+    {
+        u = u << 8 | addr[i];
+    }
+    return u;
+}
+
 static int
 dpif_netdev_execute(struct dpif *dpif, struct dpif_execute *execute)
     OVS_NO_THREAD_SAFETY_ANALYSIS
 {
+    VLOG_INFO("=== %s ===", __func__);
     struct dp_netdev *dp = get_dp_netdev(dpif);
     struct dp_netdev_pmd_thread *pmd;
     struct dp_packet_batch pp;
@@ -3834,6 +3847,16 @@ dpif_netdev_execute(struct dpif *dpif, struct dpif_execute *execute)
                                flow_hash_5tuple(execute->flow, 0));
     }
 
+    struct eth_header *eth;
+    eth = dp_packet_data(execute->packet);
+    __u64 saddr = u8_arr_to_u64(eth->eth_src.ea, 6);
+    __u64 daddr = u8_arr_to_u64(eth->eth_dst.ea, 6);
+    char src[100];
+    ether_ntoa_r((struct ether_addr *)&saddr, src);
+    char dst[100];
+    ether_ntoa_r((struct ether_addr *)&daddr, dst);
+
+    VLOG_INFO("=== src: %s, dst: %s, proto: %x ===", src, dst, ntohs(eth->eth_type));
     dp_packet_batch_init_packet(&pp, execute->packet);
     pp.do_not_steal = true;
     dp_netdev_execute_actions(pmd, &pp, false, execute->flow,
@@ -6789,6 +6812,7 @@ fast_path_processing(struct dp_netdev_pmd_thread *pmd,
                      uint8_t *index_map,
                      odp_port_t in_port)
 {
+    VLOG_INFO("=== %s ===", __func__);
     const size_t cnt = dp_packet_batch_size(packets_);
 #if !defined(__CHECKER__) && !defined(_WIN32)
     const size_t PKT_ARRAY_SIZE = cnt;
@@ -7138,6 +7162,7 @@ dp_execute_cb(void *aux_, struct dp_packet_batch *packets_,
               const struct nlattr *a, bool should_steal)
     OVS_NO_THREAD_SAFETY_ANALYSIS
 {
+    VLOG_INFO("=== %s ===", __func__);
     struct dp_netdev_execute_aux *aux = aux_;
     uint32_t *depth = recirc_depth_get();
     struct dp_netdev_pmd_thread *pmd = aux->pmd;
@@ -7496,6 +7521,13 @@ dp_netdev_execute_actions(struct dp_netdev_pmd_thread *pmd,
                           const struct nlattr *actions, size_t actions_len)
 {
     struct dp_netdev_execute_aux aux = { pmd, flow };
+
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    flow_format(&ds, flow, NULL);
+    ds_put_cstr(&ds, ", actions=");
+    format_odp_actions(&ds, actions, actions_len, NULL);
+    VLOG_INFO("Netdev Func %s odp key :\n%s", __func__, ds_cstr(&ds));
+    ds_destroy(&ds);
 
     odp_execute_actions(&aux, packets, should_steal, actions,
                         actions_len, dp_execute_cb);

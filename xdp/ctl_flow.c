@@ -6,6 +6,11 @@
 #include "flow.h"
 #include "xdp_user_helpers.h"
 
+#include <netinet/ether.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
@@ -127,8 +132,8 @@ int list_flow_cmd(int argc, char **argv, void *params)
         goto out;
 
     struct xdp_flow *flow = NULL;
-    struct xdp_flow_key *key = NULL;
-    struct xdp_flow **list_flow;
+    struct xdp_flow_key key;
+    struct xdp_flow *list_flow;
     list_flow = malloc(MAX_FLOWS * sizeof(struct xdp_flow_key));
     int cnt = 0;
     if (strcmp(args.dp_name, ""))
@@ -138,10 +143,10 @@ int list_flow_cmd(int argc, char **argv, void *params)
         };
         while (!error && cnt < MAX_FLOWS)
         {
-            error = xdp_dp_flow_next(&dp, key, flow);
+            error = xdp_dp_flow_next(&dp, &key, &flow);
             if (!error)
             {
-                memcpy(key, &flow->key, sizeof(struct xdp_flow_key));
+                memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
                 memcpy(&list_flow[cnt], flow, sizeof(struct xdp_flow));
                 cnt++;
             }
@@ -163,10 +168,10 @@ int list_flow_cmd(int argc, char **argv, void *params)
 
         while (!error && cnt < MAX_FLOWS)
         {
-            error = xdp_if_flow_next(if_index, key, flow);
+            error = xdp_if_flow_next(if_index, &key, &flow);
             if (!error)
             {
-                memcpy(key, &flow->key, sizeof(struct xdp_flow_key));
+                memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
                 memcpy(&list_flow[cnt], flow, sizeof(struct xdp_flow));
                 cnt++;
             }
@@ -189,8 +194,8 @@ print:
     }
     for (size_t i = 0; i < cnt; i++)
     {
-        char buf[4096];
-        error = format_xdp_key(&list_flow[i]->key, buf);
+        char buf[4096];        
+        error = format_xdp_key(&list_flow[i].key, buf);
         if (error)
         {
             goto out;

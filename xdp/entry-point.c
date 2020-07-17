@@ -86,7 +86,7 @@ static inline int key_extract(struct hdr_cursor *nh, void *data_end, struct xdp_
             goto out;
         }
         
-        key->arph.arp_op = arph->ar_op;
+        key->arph.ar_op = arph->ar_op;
         key->arph.arp_sip = arph->ar_sip;
         key->arph.arp_tip = arph->ar_tip;
         
@@ -208,6 +208,7 @@ int xdp_process(struct xdp_md *ctx)
     __u8 keybuf[XDP_FLOW_KEY_LEN_u64];
     __u8 fmbuf[XDP_FLOW_METADATA_KEY_LEN_u64];
     memset(keybuf, 0, XDP_FLOW_KEY_LEN_u64);
+    /* Extract the flow key from the packet and put it in the key buffer (keybuf) */
     struct xdp_flow_key *key = (struct xdp_flow_key *)keybuf;
     err = key_extract(&nh, data_end, key);
     if (err)
@@ -215,16 +216,18 @@ int xdp_process(struct xdp_md *ctx)
         goto out;
     }
 
+    /* Check if there are flow actions for the extracted key */
     flow = bpf_map_lookup_elem(&flow_table, keybuf);
-    if (!flow)
+    if (!flow) /* If there are no flow actions, make an upcall */
     {
-        bpf_printk("INFO: Upcall needed\n");
         /* NOTE: for debug only. In production uncomment */
+        bpf_printk("INFO: Upcall needed\n");
         log_flow_key(key);
-
         free(flow);
+        /* Get the receive queue index and upcall via the XSK socket */
         int index = ctx->rx_queue_index;
 
+        /* Add upcall information at the head of the packet */
         struct xdp_upcall upcall;
         memset(&upcall, 0, sizeof(struct xdp_upcall));
         upcall.type = XDP_PACKET_CMD_MISS;
@@ -251,8 +254,8 @@ int xdp_process(struct xdp_md *ctx)
         }
 
         memcpy(up, &upcall, sizeof(*up));
-
         bpf_printk("Added upcall info\n");
+
         /* NOTE: if you don't put bpf_redirect_map in the program that you load to on the interface
          * and rather put it in a tail program e.g., bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL)
          * and you create a xsk_socket for the interface. The xsk_socket seems to be created without an error
@@ -268,20 +271,26 @@ int xdp_process(struct xdp_md *ctx)
         goto out;
     }
 
-    struct act_cursor cur;
-    memcpy(&cur, &flow->actions.data[0], sizeof(struct act_cursor));
-    int k = 0;
-    if (bpf_map_update_elem(&percpu_actions, &k, &flow->actions, 0))
-    {
-        bpf_printk("Could not update percpu_actions map\n");
-        goto out;
-    }
+    /* Flow actions were found. Redirect the packet to a tail program that executes the action */
+
+    /* And the actions found to the actions buffer (actbuf) */
+    // __u8 actbuf[XDP_FLOW_ACTIONS_LEN_u64];
+    // memcpy(actbuf, &flow->actions, XDP_FLOW_ACTIONS_LEN_u64);
+    // int k = 0;
+    // if (bpf_map_update_elem(&percpu_actions, &k, actbuf, 0))
+    // {
+    //     bpf_printk("Could not update percpu_actions map\n");
+    //     goto out;
+    // }
 
     /* NOTE: Could not pass the array inside the struct flow.actions.data 
      * the program was failing at load time. Not sure what the cause was 
      * as the flow was initialised by memset hence should pass the bound 
      * check. Passing an independant array worked so designed it around that 
      * */
+     
+    /* Add the flow metadata to the head of the packet. The metadata is used 
+       for executing the actions */
     struct flow_metadata *fm_cpy = (struct flow_metadata *)fmbuf;
     memset(fmbuf, 0, XDP_FLOW_METADATA_KEY_LEN_u64);
     fm_cpy->pos = 0;
