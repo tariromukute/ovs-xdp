@@ -96,20 +96,22 @@ int xdp_dp_port_next(struct xdp_datapath *dp, struct xport *xport)
 }
 
 /* entry point flows */
-int xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow)
+int xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow **flowp)
 {
     int err = 0;
     __u8 act_buf[XDP_FLOW_ACTIONS_LEN_u64] = { 0 };
     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
-    memcpy(key_buf, key, sizeof(flow->key));
+    memcpy(key_buf, key, sizeof(struct xdp_flow_key));
 
     err = xdp_flow_map_lookup(map_fd, key_buf, act_buf);
     if (err) {
         /* TODO: check error and return code */
         goto out;
     }
-    memcpy(&flow->actions, act_buf, sizeof(struct xdp_flow_action));
+    struct xdp_flow flow;
+    memcpy(&flow.actions, act_buf, sizeof(struct xdp_flow_actions));
 
+    *flowp = &flow;
 out:
     return err;
 }
@@ -133,11 +135,10 @@ out:
 /* TODO: think need pointer to a pointer here for key */
 int xdp_ep_flow_next(int map_fd, struct xdp_flow_key *pkey, struct xdp_flow **flowp)
 {
-    printf("%s \n", __func__);
+    // printf("%s \n", __func__);
     struct xdp_flow flow;
     memset(&flow, 0, sizeof(struct xdp_flow));
 
-    __u8 zero_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
     
     if (pkey)
@@ -169,7 +170,7 @@ out:
 
 int xdp_ep_flow_remove(int map_fd, struct xdp_flow_key *key)
 {
-    printf("%s \n", __func__);
+    // printf("%s \n", __func__);
     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
     memcpy(key_buf, key, sizeof(*key));
     int err = 0;
@@ -203,46 +204,46 @@ out:
 int
 xdp_ep_flow_stats_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow)
 {
-    printf("%s \n", __func__);
+    // printf("%s \n", __func__);
     int err = 0;
-    __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
-    memcpy(key_buf, &flow->key, sizeof(flow->key));
+//     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
+//     memcpy(key_buf, &flow->key, sizeof(flow->key));
 
-    err = xdp_flow_stats_map_lookup(map_fd, key_buf, &flow->stats);
-    if (err) {
-        /* TODO: check error and return code */
-        goto out;
-    }
+//     err = xdp_flow_stats_map_lookup(map_fd, key_buf, &flow->stats);
+//     if (err) {
+//         /* TODO: check error and return code */
+//         goto out;
+//     }
 
-out:
+// out:
     return err;
 }
 
 int
 xdp_ep_flow_stats_next(int map_fd, struct xdp_flow_key *pkey, struct xdp_flow *flow)
 {
-    printf("%s \n", __func__);
-    __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
-    if (pkey)
-        memcpy(key_buf, pkey, sizeof(*pkey));
+    // printf("%s \n", __func__);
     int err = 0;
+//     __u8 key_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
+//     if (pkey)
+//         memcpy(key_buf, pkey, sizeof(*pkey));
 
-    __u8 nkey_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
+//     __u8 nkey_buf[XDP_FLOW_KEY_LEN_u64] = { 0 };
 
-    err = xdp_flow_map_next_key(map_fd, key_buf, nkey_buf);
-    if (err) {
-        /* TODO: check error and return code */
-        goto out;
-    }
-    memcpy(&flow->key, nkey_buf, sizeof(struct xdp_flow_key));
+//     err = xdp_flow_map_next_key(map_fd, key_buf, nkey_buf);
+//     if (err) {
+//         /* TODO: check error and return code */
+//         goto out;
+//     }
+//     memcpy(&flow->key, nkey_buf, sizeof(struct xdp_flow_key));
 
-    err = xdp_flow_stats_map_lookup(map_fd, nkey_buf, &flow->stats);
-    if (err) {
-        /* TODO: check error and return code */
-        goto out;
-    }
+//     err = xdp_flow_stats_map_lookup(map_fd, nkey_buf, &flow->stats);
+//     if (err) {
+//         /* TODO: check error and return code */
+//         goto out;
+//     }
 
-out:
+// out:
     return err;
 }
 
@@ -264,9 +265,9 @@ out:
 
 /* interface flows */
 int
-xdp_if_flow_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow)
+xdp_if_flow_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow **flowp)
 {
-    printf("%s \n", __func__);
+    // printf("%s \n", __func__);
     int err = 0;
     char ifname[NAME_MAX];
     if_indextoname(if_index, ifname);
@@ -286,7 +287,7 @@ xdp_if_flow_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow
         goto out;
     }
     
-    err = xdp_ep_flow_lookup(map_fd, key, flow);
+    err = xdp_ep_flow_lookup(map_fd, key, flowp);
 out:
     return err;
 }
@@ -322,11 +323,11 @@ out:
 int
 xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow **flowp)
 {
-    printf("%s \n", __func__);
+    // printf("%s \n", __func__);
     int err = 0;
     char ifname[NAME_MAX];
     if_indextoname(if_index, ifname);
-    printf("ifname %s\n", ifname);
+    // printf("ifname %s\n", ifname);
     char buf[PATH_MAX];
     int len = snprintf(buf, PATH_MAX, "%s/%s/%s", pin_basedir, ifname, flow_map);
     if (len < 0) {
@@ -337,14 +338,11 @@ xdp_if_flow_next(int if_index, struct xdp_flow_key *key, struct xdp_flow **flowp
         goto out;
     }
 
-    printf("buf %s\n", buf);
     int map_fd = bpf_obj_get(buf);
-    printf("map_fd %d\n", map_fd);
     if (map_fd < 0) {
         err = ENOENT;
         goto out;
     }
-
 
     err = xdp_ep_flow_next(map_fd, key, flowp);
 
@@ -412,7 +410,7 @@ out:
 int
 xdp_if_flow_stats_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow)
 {
-    printf("%s \n", __func__);
+    // printf("%s \n", __func__);
     int err = 0;
     char ifname[NAME_MAX];
     if_indextoname(if_index, ifname);

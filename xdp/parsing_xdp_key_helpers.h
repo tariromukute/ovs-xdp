@@ -92,7 +92,7 @@ static inline int parse_xdp_key_arp(struct hdr_cursor *nh,
 
     struct xdp_key_arp arp;
     memset(&arp, 0, sizeof(struct xdp_key_arp));
-    arp.ar_op = arph->ar_op;
+    // arp.ar_op = arph->ar_op;
     arp.arp_sip = arph->ar_sip;
     arp.arp_tip = arph->ar_tip;
     
@@ -159,6 +159,7 @@ static __always_inline int parse_xdp_key_iphdr(struct hdr_cursor *nh,
     ipv4.ipv4_tos = iph->tos;
     ipv4.ipv4_ttl = iph->ttl;
 
+    bpf_printk("--- iph->protocol %d ----\n");
     nh->pos += hdrsize;
     *key_ipv4 = &ipv4;
 

@@ -2,12 +2,20 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <net/if.h>
 #include <netinet/ether.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <bpf/bpf_endian.h>
+#include <bpf/libbpf.h>
+#include <bpf/bpf.h>
+#include <signal.h>
 #include "ctl_logs.h"
+#include "xdp_user_helpers.h"
+#include "dynamic-string.h"
+#include "flow.h"
+#include "datapath.h"
 
 #define TRACEFS_PIPE "/sys/kernel/debug/tracing/trace_pipe"
 
@@ -15,398 +23,53 @@
 #define PATH_MAX 4096
 #endif
 
+#define SAMPLE_SIZE 64ul
+// #define SAMPLE_SIZE sizeof(struct xdp_flow_key)
+
+static const char *pin_basedir = "/sys/fs/bpf";
+static const char *_perf_map = "_perf_map";
+static struct perf_buffer *pb = NULL;
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
-static void print_ether_addr(const char *type, char *str)
-{
-    __u64 addr;
 
-    if (1 != sscanf(str, "%llu", &addr))
-        return;
-    printf("%s=%s ", type, ether_ntoa((struct ether_addr *)&addr));
-}
-
-static void print_ip_addr(const char *type, char *str)
+static int list_map_keys() 
 {
-    __be32 addr;
-    void *ptr = &addr;
-    char buf[INET_ADDRSTRLEN];
-    if (1 != sscanf(str, "%u", &addr))
-        return;
-    printf("%s=%s ", type, inet_ntop(AF_INET, ptr, buf, sizeof(buf)));
-}
-
-static void print_ipv6_addr(const char *type, char *str)
-{
-    __be64 addr[2];
-    void *ptr = &addr;
-    char buf[INET6_ADDRSTRLEN];
-    if (2 != sscanf(str, "%llu-%llu", &addr[0], &addr[1]))
-        return;
-    printf("%s=%s ", type, inet_ntop(AF_INET6, ptr, buf, sizeof(buf)));
-}
-
-static void print_nsh_md1_context(const char *type, char *str)
-{
-    __be64 addr[2];
-    if (2 != sscanf(str, "%llu-%llu", &addr[0], &addr[1]))
-        return;
-    printf("%s=%llx%llx ", type, bpf_be64_to_cpu(addr[0]), bpf_be64_to_cpu(addr[1]));
-}
-static void print_u32(const char *type, char *str)
-{
-    __u32 i;
-    if (1 == sscanf(str, "%u", &i))
-        printf("%s=%u ", type, i);
-}
-
-// static void print_be32(const char *type, char *str)
-// {
-//     __be32 i;
-//     if (1 == sscanf(str, "%u", &i))
-//         printf("%s=%u ", type, ntohl(i));
-// }
-
-static void print_be16(const char *type, char *str)
-{
-    __be16 i;
-    if (1 == sscanf(str, "%hu", &i))
-        printf("%s=%u ", type, ntohs(i));
-}
-
-static void print_hex32(const char *type, char *str)
-{
-    __u32 i;
-    if (1 == sscanf(str, "%u", &i))
-        printf("%s=0x%08x ", type, i);
-}
-
-static void print_hex16(const char *type, char *str)
-{
-    __u32 i;
-    if (1 == sscanf(str, "%u", &i))
-        printf("%s=0x%04x ", type, i);
-}
-
-static void print_xdp_key_ethernet(char *tok, char **saveptr)
-{
-    printf("\n");
-    while (tok)
+    int error = 0;
+    int if_index = -1;
+    if_index = if_nametoindex("vxdp0");
+    if (if_index < 0)
     {
-        if (!strncmp(tok, "eth_src:", 8))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ether_addr("eth_src", tok);
-        }
-
-        if (!strncmp(tok, "eth_dst:", 8))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ether_addr("eth_dst", tok);
-        }
-
-        if (!strncmp(tok, "h_proto:", 8))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_hex16("h_proto", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
+        error = ENONET;
+        goto out;
     }
-}
 
-static void print_xdp_key_ipv6(char *tok, char **saveptr)
-{
-    // unsigned int proto;
-    while (tok)
+    int MAX_FLOWS = 10;
+    int cnt = 0;
+    struct xdp_flow_key key;
+    struct xdp_flow *flow = NULL;
+    printf("----Printing list of keys in map ----\n");
+    while (!error && cnt < MAX_FLOWS)
     {
-        if (!strncmp(tok, "ipv6_src:", 9))
+        error = xdp_if_flow_next(if_index, &key, &flow);
+        if (!error)
         {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ipv6_addr("ipv6_src", tok);
+            memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
+            struct ds ds = DS_EMPTY_INITIALIZER;
+            format_key_to_hex(&ds, &key);
+            printf("%s \n", ds_cstr(&ds));
+            ds_destroy(&ds);
+            cnt++;
         }
-
-        if (!strncmp(tok, "ipv6_dst:", 9))
+        else
         {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ipv6_addr("ipv6_dst", tok);
+            break;
         }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        if (!strncmp(tok, "ipv6_proto:", 12))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv6_proto", tok);
-        }
-        if (!strncmp(tok, "ipv6_tclass:", 13))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv6_tclass", tok);
-        }
-        if (!strncmp(tok, "ipv6_hlimit:", 13))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv6_hlimit", tok);
-        }
-        if (!strncmp(tok, "ipv6_frag:", 11))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv6_frag", tok);
-        }
-        tok = strtok_r(NULL, " ", saveptr);
     }
-}
+    printf("-----------------------------------\n");
 
-static void print_xdp_key_ipv4(char *tok, char **saveptr)
-{
-    // unsigned int proto;
-    while (tok)
-    {
-        if (!strncmp(tok, "ipv4_src:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ip_addr("ipv4_src", tok);
-        }
-
-        if (!strncmp(tok, "ipv4_dst:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ip_addr("ipv4_dst", tok);
-        }
-        if (!strncmp(tok, "ipv4_proto:", 12))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv4_proto", tok);
-        }
-        if (!strncmp(tok, "ipv4_tos:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv4_tos", tok);
-        }
-        if (!strncmp(tok, "ipv4_ttl:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv4_ttl", tok);
-        }
-        if (!strncmp(tok, "ipv4_frag:", 11))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ipv4_frag", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_arp(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-        if (!strncmp(tok, "arp_sip:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ip_addr("arp_sip", tok);
-        }
-        if (!strncmp(tok, "arp_tip:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ip_addr("arp_tip", tok);
-        }
-        if (!strncmp(tok, "arp_op:", 8))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("arp_op", tok);
-        }
-        if (!strncmp(tok, "arp_sha:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ether_addr("arp_sha", tok);
-        }
-        if (!strncmp(tok, "arp_tha:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_ether_addr("arp_tha", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_tcp(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-        if (!strncmp(tok, "tcp_src:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_be16("tcp_src", tok);
-        }
-        if (!strncmp(tok, "tcp_dst:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_be16("tcp_dst", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_udp(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-
-        if (!strncmp(tok, "udp_src:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_be16("udp_src", tok);
-        }
-        if (!strncmp(tok, "udp_dst:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_be16("udp_dst", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_sctp(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-        if (!strncmp(tok, "sctp_src:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_be16("sctp_src", tok);
-        }
-        if (!strncmp(tok, "sctp_dst:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_be16("sctp_dst", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_icmp(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-
-        if (!strncmp(tok, "icmp_type:", 11))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("icmp_type", tok);
-        }
-        if (!strncmp(tok, "icmp_code:", 11))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("icmp_code", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_icmpv6(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-        if (!strncmp(tok, "icmpv6_type:", 13))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("icmpv6_type", tok);
-        }
-        if (!strncmp(tok, "icmpv6_code:", 13))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("icmpv6_code", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_nsh_base(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-        if (!strncmp(tok, "flags:", 7))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("flags", tok);
-        }
-        if (!strncmp(tok, "ttl:", 5))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("ttl", tok);
-        }
-        if (!strncmp(tok, "mdtype:", 8))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("mdtype", tok);
-        }
-        if (!strncmp(tok, "np:", 4))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_u32("np", tok);
-        }
-        if (!strncmp(tok, "path_hdr:", 10))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_hex32("path_hdr", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
-}
-
-static void print_xdp_key_nsh_md1(char *tok, char **saveptr)
-{
-    while (tok)
-    {
-        if (!strncmp(tok, "context:", 9))
-        {
-            tok = strtok_r(NULL, " ", saveptr);
-            print_nsh_md1_context("context", tok);
-        }
-        if (!strncmp(tok, ":line", 5))
-        {
-            printf("\n");
-        }
-        tok = strtok_r(NULL, " ", saveptr);
-    }
+out:
+    return error;
 }
 
 int logs_cmd(int argc, char **argv, void *params)
@@ -441,6 +104,40 @@ struct log_level
     int error;
     int debug;
 };
+
+static void sig_handler(int signo)
+{
+    perf_buffer__free(pb);
+    exit(0);
+}
+
+static void print_bpf_output(void *ctx, int cpu, void *data, __u32 size)
+{
+    struct {
+        __u16 cookie;
+        __u16 pkt_len;
+        struct xdp_flow_key key;
+        __u8  pkt_data[SAMPLE_SIZE];
+    } __attribute__((packed)) *e = data;
+
+    list_map_keys();
+    if (e->cookie == 0xa1ee) {
+        printf("========== Key found in map ============\n");
+    } else if (e->cookie == 0xdead) {
+        printf("========== Key not found in map ============\n");
+    } else {
+        printf("BUG cookie %x sized %d\n", e->cookie, size);
+        return;
+    }
+
+    struct xdp_flow_key key;
+    memcpy(&key, &e->key, sizeof(struct xdp_flow_key));
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    format_key_to_hex(&ds, &key);
+    printf("%s \n", ds_cstr(&ds));
+    printf("=================================================\n");
+    ds_destroy(&ds);
+}
 
 struct option_wrapper list_logs_options[] = {
     {{"help", no_argument, 0, 'h'}, "Show help", ""},
@@ -521,99 +218,54 @@ out:
     return error;
 }
 
-static struct log_level level;
+struct log_level level;
 int list_logs_cmd(int argc, char **argv, void *params)
 {
     char *description = "Prints out the logs from the datapath. It can print all logs\n\
                         or filter by log level: debug, error, info.";
     char *use = "xdp-ctl logs list [flags]";
     int error = 0;
-    FILE *stream;
-    char *line = NULL;
-    size_t len = 0;
-    ssize_t nread;
 
-    stream = fopen(TRACEFS_PIPE, "r");
-    if (stream == NULL)
-    {
-        perror("fopen");
+    char buf[PATH_MAX];
+    int len = snprintf(buf, PATH_MAX, "%s/%s", pin_basedir, _perf_map);
+    if (len < 0) {
+        error = -EINVAL;
+        goto out;
+    } else if(len >= PATH_MAX) {
+        error = ENAMETOOLONG;
+        goto out;
+    }
+
+    int map_fd = bpf_obj_get(buf);
+    if (map_fd < 0) {
         error = ENOENT;
+        
         goto out;
     }
+    struct perf_buffer_opts pb_opts = {};
 
-    error = parse_list_logs_options(argc, argv, &level);
-    if (error)
-        goto out;
-
-    while ((nread = getline(&line, &len, stream)) != -1)
-    {
-        char *tok, *saveptr;
-
-        tok = strtok_r(line, " ", &saveptr);
-        while (tok)
-        {
-            // printf("tok %s", tok);
-            if (!strncmp(tok, "xdp_key_ethernet:", 18))
-            {
-                print_xdp_key_ethernet(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_ipv6:", 14))
-            {
-                print_xdp_key_ipv6(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_ipv4:", 14))
-            {
-                print_xdp_key_ipv4(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_tcp:", 13))
-            {
-                print_xdp_key_tcp(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_udp:", 13))
-            {
-                print_xdp_key_udp(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_sctp:", 14))
-            {
-                print_xdp_key_sctp(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_icmp:", 14))
-            {
-                print_xdp_key_icmp(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_icmpv6:", 16))
-            {
-                print_xdp_key_icmpv6(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_arp:", 13))
-            {
-                print_xdp_key_arp(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_nsh_base:", 18))
-            {
-                print_xdp_key_nsh_base(tok, &saveptr);
-            }
-
-            if (!strncmp(tok, "xdp_key_nsh_md1:", 17))
-            {
-                print_xdp_key_nsh_md1(tok, &saveptr);
-            }
-            tok = strtok_r(NULL, " ", &saveptr);
-        }
+    if (signal(SIGINT, sig_handler) ||
+        signal(SIGHUP, sig_handler) ||
+        signal(SIGTERM, sig_handler)) {
+        printf("signal\n");
+        return 1;
     }
 
+    pb_opts.sample_cb = print_bpf_output;
+    pb = perf_buffer__new(map_fd, 8, &pb_opts);
+    error = libbpf_get_error(pb);
+    if (error) {
+        printf("perf_buffer setup failed\n");
+        return 1;
+    }
+
+    while ((error = perf_buffer__poll(pb, 1000)) >= 0) {
+    }
+
+    kill(0, SIGINT);
+    
 out:
-    free(line);
-    fclose(stream);
+    
     if (error == EINVAL)
         print_cmd_usage(description, use, NULL, list_logs_options);
     return error;

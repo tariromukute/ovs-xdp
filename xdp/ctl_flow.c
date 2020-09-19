@@ -122,7 +122,7 @@ int list_flow_cmd(int argc, char **argv, void *params)
 {
     char *description = "Prints out the logs from the datapath. It can print all logs\n\
                         or filter by log level: debug, error, info.";
-    char *use = "xdp-ctl logs list [flags]";
+    char *use = "xdp-ctl flows list [flags]";
     int MAX_FLOWS = 10;
     int error = 0;
     struct flow_arguments args;
@@ -134,7 +134,7 @@ int list_flow_cmd(int argc, char **argv, void *params)
     struct xdp_flow *flow = NULL;
     struct xdp_flow_key key;
     struct xdp_flow *list_flow;
-    list_flow = malloc(MAX_FLOWS * sizeof(struct xdp_flow_key));
+    list_flow = malloc(MAX_FLOWS * sizeof(struct xdp_flow));
     int cnt = 0;
     if (strcmp(args.dp_name, ""))
     {
@@ -201,6 +201,11 @@ print:
             goto out;
         }
         printf("%s\n", buf);
+        error = format_xdp_actions(&list_flow[i].actions);
+        if (error)
+        {
+            goto out;
+        }
     }
 
 out:

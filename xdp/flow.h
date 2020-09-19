@@ -21,17 +21,21 @@ enum xdp_packet_cmd {
 };
 
 enum proto_valid {
-    ETHER_VALID = 1 << 0,
+    ETH_VALID = 1 << 0,
     MPLS_VALID = 1 << 1,
     IPV4_VALID = 1 << 2,
     IPV6_VALID = 1 << 3,
     ARP_VALID = 1 << 4,
     TCP_VALID = 1 << 5,
     UDP_VALID = 1 << 6,
-    ICMP_VALID = 1 << 7,
-    VLAN_VALID = 1 << 8,
-    CVLAN_VALID = 1 << 9,
-    ICMPV6_VALID = 1 << 10,
+    SCTP_VALID = 1 << 7,
+    ICMP_VALID = 1 << 8,
+    VLAN_VALID = 1 << 9,
+    CVLAN_VALID = 1 << 10,
+    ICMPV6_VALID = 1 << 11,
+    NSH_BASE_VALID = 1 << 12,
+    NSH_MD1_VALID = 1 << 13,
+    NSH_MD2_VALID = 1 << 14
 };
 
 /* Keys */
@@ -64,7 +68,7 @@ struct xdp_key_ipv6 {
         __be32 addr_b32[4];
         __be64 addr_b64[2];
     } ipv6_dst;
-    // __be32 ipv6_label;    /* 20-bits in least-significant bits. */
+    // __be32 ipv6_label;    /* 20-bits in least-significant bits. */ /* TODO: when you enable it enbale the odp_ functions too */
     __u8   ipv6_proto;
     __u8   ipv6_tclass;
     __u8   ipv6_hlimit;
@@ -317,7 +321,7 @@ enum xdp_action_attr {
     XDP_ACTION_ATTR_POP_NSH,      /* No argument. */
     XDP_ACTION_ATTR_METER,        /* u32 meter ID. */
     XDP_ACTION_ATTR_CLONE,        /* Nested OVS_CLONE_ATTR_*.  */
-
+    XDP_ACTION_ATTR_DROP,
     __XDP_ACTION_ATTR_MAX,          /* Nothing past this will be accepted
                        * from userspace. */
 
@@ -330,72 +334,39 @@ enum xdp_action_attr {
 
 struct xdp_len_tbl {
     char *name;
+    __u32 len;
     const struct xdp_len_tbl *next;
 };
 
-// static int
-// odp_action_len(uint16_t type)
-// {
-//     if (type > OVS_ACTION_ATTR_MAX) {
-//         return -1;
-//     }
-
-//     switch ((enum ovs_action_attr) type) {
-//     case OVS_ACTION_ATTR_OUTPUT: return sizeof(uint32_t);
-//     case OVS_ACTION_ATTR_TRUNC: return sizeof(struct ovs_action_trunc);
-//     case OVS_ACTION_ATTR_TUNNEL_PUSH: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_TUNNEL_POP: return sizeof(uint32_t);
-//     case OVS_ACTION_ATTR_METER: return sizeof(uint32_t);
-//     case OVS_ACTION_ATTR_USERSPACE: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_PUSH_VLAN: return sizeof(struct ovs_action_push_vlan);
-//     case OVS_ACTION_ATTR_POP_VLAN: return 0;
-//     case OVS_ACTION_ATTR_PUSH_MPLS: return sizeof(struct ovs_action_push_mpls);
-//     case OVS_ACTION_ATTR_POP_MPLS: return sizeof(ovs_be16);
-//     case OVS_ACTION_ATTR_RECIRC: return sizeof(uint32_t);
-//     case OVS_ACTION_ATTR_HASH: return sizeof(struct ovs_action_hash);
-//     case OVS_ACTION_ATTR_SET: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_SET_MASKED: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_SAMPLE: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_CT: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_CT_CLEAR: return 0;
-//     case OVS_ACTION_ATTR_PUSH_ETH: return sizeof(struct ovs_action_push_eth);
-//     case OVS_ACTION_ATTR_POP_ETH: return 0;
-//     case OVS_ACTION_ATTR_CLONE: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_PUSH_NSH: return ATTR_LEN_VARIABLE;
-//     case OVS_ACTION_ATTR_POP_NSH: return 0;
-
-//     case OVS_ACTION_ATTR_UNSPEC:
-//     case __OVS_ACTION_ATTR_MAX:
-//         return ATTR_LEN_INVALID;
-//     }
-
-//     return ATTR_LEN_INVALID;
-// }
+#define INVALID_ATTR_LEN  -1
+#define VARIABLE_ATTR_LEN -2
+#define NESTED_ATTR_LEN   -3
 
 static const struct xdp_len_tbl
 xdp_action_attr_list[TAIL_TABLE_SIZE] = {
-    [XDP_ACTION_ATTR_UNSPEC] = { .name = "OVS_ACTION_ATTR_UNSPEC"},
-    [XDP_ACTION_ATTR_OUTPUT] =  { .name = "OVS_ACTION_ATTR_OUTPUT"},
-    [XDP_ACTION_ATTR_USERSPACE] =  { .name = "OVS_ACTION_ATTR_USERSPACE"},
-    [XDP_ACTION_ATTR_SET] = { .name = "OVS_ACTION_ATTR_SET"},
-    [XDP_ACTION_ATTR_PUSH_VLAN] = { .name = "OVS_ACTION_ATTR_PUSH_VLAN"} ,
-    [XDP_ACTION_ATTR_POP_VLAN] =  { .name = "OVS_ACTION_ATTR_POP_VLAN"},
-    [XDP_ACTION_ATTR_SAMPLE] =  { .name = "OVS_ACTION_ATTR_SAMPLE"},
-    [XDP_ACTION_ATTR_RECIRC] =  { .name = "OVS_ACTION_ATTR_RECIRC"},
-    [XDP_ACTION_ATTR_HASH] =  { .name = "OVS_ACTION_ATTR_HASH"},
-    [XDP_ACTION_ATTR_PUSH_MPLS] =  { .name = "OVS_ACTION_ATTR_PUSH_MPLS"},
-    [XDP_ACTION_ATTR_POP_MPLS] = { .name = "OVS_ACTION_ATTR_POP_MPLS"} ,
-    [XDP_ACTION_ATTR_SET_MASKED] =  { .name = "OVS_ACTION_ATTR_SET_MASKED"},
-    [XDP_ACTION_ATTR_CT] = { .name = "OVS_ACTION_ATTR_CT"},
-    [XDP_ACTION_ATTR_TRUNC] = { .name = "OVS_ACTION_ATTR_TRUNC"} ,
-    [XDP_ACTION_ATTR_PUSH_ETH] =  { .name = "OVS_ACTION_ATTR_PUSH_ETH"},
-    [XDP_ACTION_ATTR_POP_ETH] =  { .name = "OVS_ACTION_ATTR_POP_ETH"},
-    [XDP_ACTION_ATTR_CT_CLEAR] =  { .name = "OVS_ACTION_ATTR_CT_CLEAR"},
-    [XDP_ACTION_ATTR_PUSH_NSH] =  { .name = "OVS_ACTION_ATTR_PUSH_NSH"},
-    [XDP_ACTION_ATTR_POP_NSH] =  { .name = "OVS_ACTION_ATTR_POP_NSH"},
-    [XDP_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER"},
-    [XDP_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE"},
-    [XDP_ACTION_ATTR_UPCALL] = { .name = "OVS_ACTION_ATTR_UPCALL" }
+    [XDP_ACTION_ATTR_UNSPEC] = { .name = "OVS_ACTION_ATTR_UNSPEC", .len = INVALID_ATTR_LEN },
+    [XDP_ACTION_ATTR_OUTPUT] =  { .name = "OVS_ACTION_ATTR_OUTPUT", .len = sizeof(__u32)},
+    [XDP_ACTION_ATTR_USERSPACE] =  { .name = "OVS_ACTION_ATTR_USERSPACE", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_SET] = { .name = "OVS_ACTION_ATTR_SET", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_PUSH_VLAN] = { .name = "OVS_ACTION_ATTR_PUSH_VLAN", .len = sizeof(struct xdp_action_push_vlan) } ,
+    [XDP_ACTION_ATTR_POP_VLAN] =  { .name = "OVS_ACTION_ATTR_POP_VLAN", .len = 0 },
+    [XDP_ACTION_ATTR_SAMPLE] =  { .name = "OVS_ACTION_ATTR_SAMPLE", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_RECIRC] =  { .name = "OVS_ACTION_ATTR_RECIRC", .len = sizeof(__u32) },
+    [XDP_ACTION_ATTR_HASH] =  { .name = "OVS_ACTION_ATTR_HASH", .len = sizeof(struct xdp_action_hash) },
+    [XDP_ACTION_ATTR_PUSH_MPLS] =  { .name = "OVS_ACTION_ATTR_PUSH_MPLS", .len = sizeof(struct xdp_action_push_mpls) },
+    [XDP_ACTION_ATTR_POP_MPLS] = { .name = "OVS_ACTION_ATTR_POP_MPLS", .len = sizeof(__be16) } ,
+    [XDP_ACTION_ATTR_SET_MASKED] =  { .name = "OVS_ACTION_ATTR_SET_MASKED", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_CT] = { .name = "OVS_ACTION_ATTR_CT", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_TRUNC] = { .name = "OVS_ACTION_ATTR_TRUNC", .len = sizeof(struct xdp_action_trunc) } ,
+    [XDP_ACTION_ATTR_PUSH_ETH] =  { .name = "OVS_ACTION_ATTR_PUSH_ETH", .len = sizeof(struct xdp_action_push_eth) },
+    [XDP_ACTION_ATTR_POP_ETH] =  { .name = "OVS_ACTION_ATTR_POP_ETH", .len = 0 },
+    [XDP_ACTION_ATTR_CT_CLEAR] =  { .name = "OVS_ACTION_ATTR_CT_CLEAR", .len = 0 },
+    [XDP_ACTION_ATTR_PUSH_NSH] =  { .name = "OVS_ACTION_ATTR_PUSH_NSH", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_POP_NSH] =  { .name = "OVS_ACTION_ATTR_POP_NSH", .len = 0 },
+    [XDP_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER", .len = sizeof(__u32) },
+    [XDP_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_DROP] = { .name = "OVS_ACTION_ATTR_DROP", .len = 0 },
+    [XDP_ACTION_ATTR_UPCALL] = { .name = "OVS_ACTION_ATTR_UPCALL", .len =  INVALID_ATTR_LEN }
 };
 
 /* NOTE: In modern compilers, data structures are aligned by default to access memory 
@@ -445,7 +416,7 @@ struct xdp_flow_key {
         struct xdp_key_nsh_md1 nsh_md1;
         struct xdp_key_nsh_md2 nsh_md2;
     };
-    struct vlan_hdr *vlanh;
+    // struct vlan_hdr *vlanh;
 };
 
 #define XDP_FLOW_KEY_LEN_u64 PADDED_LEN_u64(sizeof(struct xdp_flow_key))
@@ -480,6 +451,7 @@ struct xdp_flow_action {
 
 struct xdp_flow_actions {
     __u8 len;
+    struct xdp_flow_stats stats;
     __u8 data[MAX_ACTION_SIZE];
 };
 
@@ -488,7 +460,7 @@ struct xdp_flow_actions {
 struct xdp_flow {
     struct xdp_flow_key key;
     // struct xdp_flow_id id;
-    struct xdp_flow_stats stats;
+    // struct xdp_flow_stats stats;
     struct xdp_flow_actions actions;
 };
 

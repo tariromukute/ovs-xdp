@@ -99,7 +99,7 @@ xdp_dp_port_next(struct xdp_datapath *dp, struct xport *xport);
 
 /* entry point flows */
 int
-xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_ep_flow_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow **flowp);
 
 int
 xdp_ep_flow_insert(int map_fd, struct xdp_flow *flow);
@@ -125,7 +125,7 @@ xdp_ep_flow_stats_flush(int map_fd);
 
 /* interface flows */
 int
-xdp_if_flow_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow *flow);
+xdp_if_flow_lookup(int if_index, struct xdp_flow_key *key, struct xdp_flow **flowp);
 
 int
 xdp_if_flow_insert(int if_index, struct xdp_flow *flow);

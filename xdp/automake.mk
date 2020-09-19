@@ -251,6 +251,8 @@ xdp_libxdp_la_LIBADD = \
 lib_LTLIBRARIES += xdp/libxdpuser.la
 
 xdp_libxdpuser_la_SOURCES = \
+	xdp/dynamic-string.h \
+	xdp/dynamic-string.c \
 	xdp/xdp_user_helpers.h \
     xdp/datapath.c \
 	xdp/datapath.h \

@@ -39,6 +39,9 @@ static const char *pin_basedir = "/sys/fs/bpf";
 static const char *prog_map_name = "tail_table";
 static const char *stats_map = "stats_map";
 static const char *flow_map = "flow_table";
+static const char *_ports_map = "_ports";
+static const char *port_flow_map = "port_flow";
+// static const char *_perf_map = "_perf_map";
 // static const char *devmap = "devmap";
 // static const char *xsks_map = "xsks_map";
 static const char *prog_name = "process";
@@ -338,49 +341,49 @@ static int pin_unpinned_maps(struct bpf_object *obj, struct config *cfg)
     return 0;
 }
 
-static int load_attach_program(const char *filename, struct config *cfg)
+static struct bpf_object *load_attach_program(const char *filename, struct config *cfg)
 {
     int prog_fd;
     struct bpf_object *obj;
     struct bpf_program *bpf_prog;
-    int err;
+    int err = 0;
     // unload first
     err = link_detach(cfg->ifindex, cfg->xdp_flags, 0);
     if (err)
     {
         VLOG_INFO("error unlinking");
-        return EXIT_FAIL;
+        return NULL;
     }
     obj = open_bpf_object(filename, 0);
     if (!obj)
     {
         VLOG_INFO("ERR: failed to open object %s\n", filename);
-        return EXIT_FAIL;
+        return NULL;
     }
     // reuse the reuseable maps, starts with _
     err = reuse_maps(obj, cfg);
     if (err)
     {
         VLOG_INFO("error reusing maps");
-        return err;
+        return NULL;
     }
     err = bpf_object__load(obj);
     if (err)
     {
-        VLOG_INFO("Error loading object");
-        return err;
+        VLOG_INFO("Error loading object err: %d", err);
+        return NULL;
     }
     bpf_prog = bpf_object__find_program_by_title(obj, cfg->progsec);
     if (!bpf_prog)
     {
         VLOG_INFO("Could not find prog");
-        return EXIT_FAIL;
+        return NULL;
     }
     prog_fd = bpf_program__fd(bpf_prog);
     if (prog_fd <= 0)
     {
         VLOG_INFO("ERR: bpf_program__fd failed\n");
-        return EXIT_FAIL_BPF;
+        return NULL;
     }
     /* At this point: BPF-progs are (only) loaded by the kernel, and prog_fd
      * is our select file-descriptor handle. Next step is attaching this FD
@@ -390,16 +393,16 @@ static int load_attach_program(const char *filename, struct config *cfg)
     if (err)
     {
         VLOG_INFO("failed to attach");
-        return err;
+        return NULL;
     }
     // pin the maps that need to be pinned
     err = pin_unpinned_maps(obj, cfg);
     if (err)
     {
         VLOG_INFO("error pinning maps");
-        return err;
+        return NULL;
     }
-    return 0;
+    return obj;
 }
 
 static int load_update_prog_map(const char *filename, struct config *cfg)
@@ -487,7 +490,7 @@ static int load_update_prog_map(const char *filename, struct config *cfg)
     return 0;
 }
 
-static int pinned_map_by_name(struct config *cfg, const char *name)
+static int pinned_map_fd_by_name(struct config *cfg, const char *name)
 {
     char buf[PATH_MAX];
     char pin_dir[PATH_MAX];
@@ -513,9 +516,34 @@ static int pinned_map_by_name(struct config *cfg, const char *name)
     return fd;
 }
 
+// static bpf_map * pinned_map_by_name(struct config *cfg, const char *name)
+// {
+//     char buf[PATH_MAX];
+//     char pin_dir[PATH_MAX];
+
+//     if (name[0] == '_') { // global map
+//         strcpy(pin_dir, pin_basedir);
+//     } else { // interface/entry point map
+//         strcpy(pin_dir, cfg->pin_dir);
+//     }
+
+//     // check if map already pinned
+//     int len = snprintf(buf, PATH_MAX, "%s/%s", pin_dir, name);
+//     // if (len < 0)
+//     // {
+//     //     return -EINVAL;
+//     // }
+//     // else if (len >= PATH_MAX)
+//     // {
+//     //     return -ENAMETOOLONG;
+//     // }
+
+//     return bpf_object__find_map_by_name();
+// }
+
 int xdp_load(struct xdp_ep *xdp_ep, const char *path, const char *ifname)
 {
-    int err;
+    int err = 0;
     struct config cfg = {
         .xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
         .ifindex   = -1,
@@ -541,9 +569,10 @@ int xdp_load(struct xdp_ep *xdp_ep, const char *path, const char *ifname)
         return EXIT_FAIL_OPTION;
     }
 
-    err = load_attach_program(ep, &cfg);
-    if (err) {
-        VLOG_INFO("error loading program\n");
+    struct bpf_object *obj = load_attach_program(ep, &cfg);
+    if (!obj) {
+        VLOG_INFO("error loading program ifname: %s, ifindex %d, program name: %s \n", cfg.ifname, cfg.ifindex, cfg.progsec);
+
     }
 
     char actions[PATH_MAX];
@@ -559,9 +588,32 @@ int xdp_load(struct xdp_ep *xdp_ep, const char *path, const char *ifname)
         return EXIT_FAIL_OPTION;
     }
 
-    xdp_ep->flow_map_fd = pinned_map_by_name(&cfg, flow_map);
-    xdp_ep->stats_map_fd = pinned_map_by_name(&cfg, stats_map);
+    xdp_ep->flow_map_fd = pinned_map_fd_by_name(&cfg, flow_map);
+    xdp_ep->stats_map_fd = pinned_map_fd_by_name(&cfg, stats_map);
     xdp_ep->ep_id = xdp_ep->flow_map_fd;
+
+    // Added the inner map
+    struct bpf_map *ports_map = bpf_object__find_map_by_name(obj, _ports_map);
+    int port_flow_fd = pinned_map_fd_by_name(&cfg, port_flow_map);
+    err = bpf_map__set_inner_map_fd(ports_map, port_flow_fd);
+    if (err) {
+        VLOG_INFO("---- Failed to add inner map, err: %d ----", err);
+        return EXIT_FAIL_OPTION;
+    }
+
+    // Add value to map for testing;
+    struct xdp_flow_key key;
+    memset(&key, 0, sizeof(struct xdp_flow_key));
+    __u8 act_buf[XDP_FLOW_ACTIONS_LEN_u64];
+
+    memset(act_buf, 1, XDP_FLOW_ACTIONS_LEN_u64);
+    err = bpf_map_update_elem(port_flow_fd, &key, act_buf, BPF_NOEXIST);
+    if (err) {
+        VLOG_INFO("---- Failed to add test data, err: %d ----", err);
+        return EXIT_FAIL_OPTION;
+    }
+
+    VLOG_INFO("--- XDP INFO: xdp_ep->flow_map_fd: %d, xdp_ep->stats_map_fd: %d, xdp_ep->ep_id: %d ----", xdp_ep->flow_map_fd, xdp_ep->stats_map_fd, xdp_ep->ep_id);
 
     return 0; 
 
