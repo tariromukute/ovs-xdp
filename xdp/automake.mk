@@ -310,6 +310,7 @@ EXTRA_DIST += \
 	xdp/parsing_helpers.h \
 	xdp/rewrite_helpers.h \
 	xdp/xf_kern.h \
+	xdp/actions.h \
 	xdp/xdp_kern_helpers.h \
 	$(XDP_C)
 

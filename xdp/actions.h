@@ -77,7 +77,7 @@ static __always_inline int xdp_push_vlan(void *pkt_data, struct xdp_md *ctx,
         return -1;
 
     struct ethhdr *eth = pkt_data;
-	struct vlan_hdr *vlh;
+    struct vlan_hdr *vlh;
 
     __u32 mt_size = pkt_data - data; // the size of the metdata added to ctx
 
@@ -88,43 +88,43 @@ static __always_inline int xdp_push_vlan(void *pkt_data, struct xdp_md *ctx,
 
     __u8 buf[buf_size];
 
-	/* First copy the metadata and Ethernet header */
-	__builtin_memcpy(buf, data, buf_size);
+    /* First copy the metadata and Ethernet header */
+    __builtin_memcpy(buf, data, buf_size);
 
-	/* Then add space in front of the packet */
-	if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(*vlh)))
-		return -1;
+    /* Then add space in front of the packet */
+    if (bpf_xdp_adjust_head(ctx, 0 - (int)sizeof(*vlh)))
+        return -1;
 
-	/* Need to re-evaluate data_end and data after head adjustment, and
-	 * bounds check, even though we know there is enough space (as we
-	 * increased it).
-	 */
-	data_end = (void *)(long)ctx->data_end;
-	data = (void *)(long)ctx->data;
+    /* Need to re-evaluate data_end and data after head adjustment, and
+     * bounds check, even though we know there is enough space (as we
+     * increased it).
+     */
+    data_end = (void *)(long)ctx->data_end;
+    data = (void *)(long)ctx->data;
 
-	if (data + buf_size > data_end)
-		return -1;
+    if (data + buf_size > data_end)
+        return -1;
 
-	/* Copy back the Ethernet header in the right place, populate the VLAN
-	 * tag with the ID and proto, and set the outer Ethernet header to VLAN
-	 * type. */
-	__builtin_memcpy(data, buf, buf_size);
+    /* Copy back the Ethernet header in the right place, populate the VLAN
+     * tag with the ID and proto, and set the outer Ethernet header to VLAN
+     * type. */
+    __builtin_memcpy(data, buf, buf_size);
 
     if (pkt_data > data_end)
         return -1;
     
     eth = pkt_data;
 
-	vlh = (void *)(eth +1);
+    vlh = (void *)(eth +1);
 
-	if (vlh + 1 > data_end)
-		return -1;
+    if (vlh + 1 > data_end)
+        return -1;
 
-	vlh->h_vlan_TCI = bpf_htons(action->vlan_tci);
-	vlh->h_vlan_encapsulated_proto = eth->h_proto;
+    vlh->h_vlan_TCI = bpf_htons(action->vlan_tci);
+    vlh->h_vlan_encapsulated_proto = eth->h_proto;
 
-	eth->h_proto = bpf_htons(ETH_P_8021Q);
-	return 0;
+    eth->h_proto = bpf_htons(ETH_P_8021Q);
+    return 0;
 }                    
 
 static __always_inline int xdp_pop_vlan(void *pkt_data, struct xdp_md *ctx)
@@ -150,38 +150,38 @@ static __always_inline int xdp_pop_vlan(void *pkt_data, struct xdp_md *ctx)
     __u8 buf[buf_size];
 
     struct ethhdr *eth = pkt_data;
-	struct vlan_hdr *vlh;
-	__be16 h_proto;
-	int vlid;
+    struct vlan_hdr *vlh;
+    __be16 h_proto;
+    int vlid;
 
-	if (!proto_is_vlan(eth->h_proto))
-		return -1;
+    if (!proto_is_vlan(eth->h_proto))
+        return -1;
 
-	/* Careful with the parenthesis here */
-	vlh = (void *)(eth + 1);
+    /* Careful with the parenthesis here */
+    vlh = (void *)(eth + 1);
 
-	/* Still need to do bounds checking */
-	if (vlh + 1 > data_end)
-		return -1;
+    /* Still need to do bounds checking */
+    if (vlh + 1 > data_end)
+        return -1;
 
-	/* Save vlan ID for returning, h_proto for updating Ethernet header */
-	vlid = bpf_ntohs(vlh->h_vlan_TCI);
-	h_proto = vlh->h_vlan_encapsulated_proto;
+    /* Save vlan ID for returning, h_proto for updating Ethernet header */
+    vlid = bpf_ntohs(vlh->h_vlan_TCI);
+    h_proto = vlh->h_vlan_encapsulated_proto;
 
-	/* Make a copy of the metadata and Ethernet header before we cut it off */
-	__builtin_memcpy(buf, data, sizeof(buf_size));
+    /* Make a copy of the metadata and Ethernet header before we cut it off */
+    __builtin_memcpy(buf, data, sizeof(buf_size));
 
-	/* Actually adjust the head pointer */
-	if (bpf_xdp_adjust_head(ctx, (int)sizeof(*vlh)))
-		return -1;
+    /* Actually adjust the head pointer */
+    if (bpf_xdp_adjust_head(ctx, (int)sizeof(*vlh)))
+        return -1;
 
-	/* Need to re-evaluate data *and* data_end and do new bounds checking
-	 * after adjusting head
-	 */
-	data = (void *)(long)ctx->data;
-	data_end = (void *)(long)ctx->data_end;
-	if (data + buf_size > data_end)
-		return -1;
+    /* Need to re-evaluate data *and* data_end and do new bounds checking
+     * after adjusting head
+     */
+    data = (void *)(long)ctx->data;
+    data_end = (void *)(long)ctx->data_end;
+    if (data + buf_size > data_end)
+        return -1;
 
 
     if (pkt_data > data_end)
@@ -189,11 +189,11 @@ static __always_inline int xdp_pop_vlan(void *pkt_data, struct xdp_md *ctx)
     
     eth = pkt_data;
 
-	/* Copy back the old metadata and Ethernet header and update the proto type */
-	__builtin_memcpy(data, buf, buf_size);
-	eth->h_proto = h_proto;
+    /* Copy back the old metadata and Ethernet header and update the proto type */
+    __builtin_memcpy(data, buf, buf_size);
+    eth->h_proto = h_proto;
 
-	return vlid;
+    return vlid;
 }
 
 static __always_inline int xdp_sample(void *pkt_data, struct xdp_md *ctx, void *action, __u32 size)
