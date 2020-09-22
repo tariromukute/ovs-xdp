@@ -23,7 +23,7 @@ struct config {
     char redirect_ifname_buf[IF_NAMESIZE];
     bool do_unload;
     bool reuse_maps;
-    char pin_dir[512];
+    char pin_dir[4096];
     char filename[512];
     char progsec[32];
     char src_mac[18];

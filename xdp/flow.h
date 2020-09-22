@@ -344,29 +344,29 @@ struct xdp_len_tbl {
 
 static const struct xdp_len_tbl
 xdp_action_attr_list[TAIL_TABLE_SIZE] = {
-    [XDP_ACTION_ATTR_UNSPEC] = { .name = "OVS_ACTION_ATTR_UNSPEC", .len = INVALID_ATTR_LEN },
-    [XDP_ACTION_ATTR_OUTPUT] =  { .name = "OVS_ACTION_ATTR_OUTPUT", .len = sizeof(__u32)},
-    [XDP_ACTION_ATTR_USERSPACE] =  { .name = "OVS_ACTION_ATTR_USERSPACE", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_SET] = { .name = "OVS_ACTION_ATTR_SET", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_PUSH_VLAN] = { .name = "OVS_ACTION_ATTR_PUSH_VLAN", .len = sizeof(struct xdp_action_push_vlan) } ,
-    [XDP_ACTION_ATTR_POP_VLAN] =  { .name = "OVS_ACTION_ATTR_POP_VLAN", .len = 0 },
-    [XDP_ACTION_ATTR_SAMPLE] =  { .name = "OVS_ACTION_ATTR_SAMPLE", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_RECIRC] =  { .name = "OVS_ACTION_ATTR_RECIRC", .len = sizeof(__u32) },
-    [XDP_ACTION_ATTR_HASH] =  { .name = "OVS_ACTION_ATTR_HASH", .len = sizeof(struct xdp_action_hash) },
-    [XDP_ACTION_ATTR_PUSH_MPLS] =  { .name = "OVS_ACTION_ATTR_PUSH_MPLS", .len = sizeof(struct xdp_action_push_mpls) },
-    [XDP_ACTION_ATTR_POP_MPLS] = { .name = "OVS_ACTION_ATTR_POP_MPLS", .len = sizeof(__be16) } ,
-    [XDP_ACTION_ATTR_SET_MASKED] =  { .name = "OVS_ACTION_ATTR_SET_MASKED", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_CT] = { .name = "OVS_ACTION_ATTR_CT", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_TRUNC] = { .name = "OVS_ACTION_ATTR_TRUNC", .len = sizeof(struct xdp_action_trunc) } ,
-    [XDP_ACTION_ATTR_PUSH_ETH] =  { .name = "OVS_ACTION_ATTR_PUSH_ETH", .len = sizeof(struct xdp_action_push_eth) },
-    [XDP_ACTION_ATTR_POP_ETH] =  { .name = "OVS_ACTION_ATTR_POP_ETH", .len = 0 },
-    [XDP_ACTION_ATTR_CT_CLEAR] =  { .name = "OVS_ACTION_ATTR_CT_CLEAR", .len = 0 },
-    [XDP_ACTION_ATTR_PUSH_NSH] =  { .name = "OVS_ACTION_ATTR_PUSH_NSH", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_POP_NSH] =  { .name = "OVS_ACTION_ATTR_POP_NSH", .len = 0 },
-    [XDP_ACTION_ATTR_METER] =  { .name = "OVS_ACTION_ATTR_METER", .len = sizeof(__u32) },
-    [XDP_ACTION_ATTR_CLONE] =  { .name = "OVS_ACTION_ATTR_CLONE", .len = VARIABLE_ATTR_LEN },
-    [XDP_ACTION_ATTR_DROP] = { .name = "OVS_ACTION_ATTR_DROP", .len = 0 },
-    [XDP_ACTION_ATTR_UPCALL] = { .name = "OVS_ACTION_ATTR_UPCALL", .len =  INVALID_ATTR_LEN }
+    [XDP_ACTION_ATTR_UNSPEC] = { .name = "XDP_ACTION_ATTR_UNSPEC", .len = INVALID_ATTR_LEN },
+    [XDP_ACTION_ATTR_OUTPUT] =  { .name = "XDP_ACTION_ATTR_OUTPUT", .len = sizeof(__u32)},
+    [XDP_ACTION_ATTR_USERSPACE] =  { .name = "XDP_ACTION_ATTR_USERSPACE", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_SET] = { .name = "XDP_ACTION_ATTR_SET", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_PUSH_VLAN] = { .name = "XDP_ACTION_ATTR_PUSH_VLAN", .len = sizeof(struct xdp_action_push_vlan) } ,
+    [XDP_ACTION_ATTR_POP_VLAN] =  { .name = "XDP_ACTION_ATTR_POP_VLAN", .len = 0 },
+    [XDP_ACTION_ATTR_SAMPLE] =  { .name = "XDP_ACTION_ATTR_SAMPLE", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_RECIRC] =  { .name = "XDP_ACTION_ATTR_RECIRC", .len = sizeof(__u32) },
+    [XDP_ACTION_ATTR_HASH] =  { .name = "XDP_ACTION_ATTR_HASH", .len = sizeof(struct xdp_action_hash) },
+    [XDP_ACTION_ATTR_PUSH_MPLS] =  { .name = "XDP_ACTION_ATTR_PUSH_MPLS", .len = sizeof(struct xdp_action_push_mpls) },
+    [XDP_ACTION_ATTR_POP_MPLS] = { .name = "XDP_ACTION_ATTR_POP_MPLS", .len = sizeof(__be16) } ,
+    [XDP_ACTION_ATTR_SET_MASKED] =  { .name = "XDP_ACTION_ATTR_SET_MASKED", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_CT] = { .name = "XDP_ACTION_ATTR_CT", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_TRUNC] = { .name = "XDP_ACTION_ATTR_TRUNC", .len = sizeof(struct xdp_action_trunc) } ,
+    [XDP_ACTION_ATTR_PUSH_ETH] =  { .name = "XDP_ACTION_ATTR_PUSH_ETH", .len = sizeof(struct xdp_action_push_eth) },
+    [XDP_ACTION_ATTR_POP_ETH] =  { .name = "XDP_ACTION_ATTR_POP_ETH", .len = 0 },
+    [XDP_ACTION_ATTR_CT_CLEAR] =  { .name = "XDP_ACTION_ATTR_CT_CLEAR", .len = 0 },
+    [XDP_ACTION_ATTR_PUSH_NSH] =  { .name = "XDP_ACTION_ATTR_PUSH_NSH", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_POP_NSH] =  { .name = "XDP_ACTION_ATTR_POP_NSH", .len = 0 },
+    [XDP_ACTION_ATTR_METER] =  { .name = "XDP_ACTION_ATTR_METER", .len = sizeof(__u32) },
+    [XDP_ACTION_ATTR_CLONE] =  { .name = "XDP_ACTION_ATTR_CLONE", .len = VARIABLE_ATTR_LEN },
+    [XDP_ACTION_ATTR_DROP] = { .name = "XDP_ACTION_ATTR_DROP", .len = 0 },
+    [XDP_ACTION_ATTR_UPCALL] = { .name = "XDP_ACTION_ATTR_UPCALL", .len =  INVALID_ATTR_LEN }
 };
 
 /* NOTE: In modern compilers, data structures are aligned by default to access memory 
@@ -441,13 +441,14 @@ struct xdp_flow_stats {
 
 #define MAX_XDP_ACTION_SIZE 24 /* 128 bits */
 
+#define XFA_MAX_NUM 4
+#define MAX_ACTION_SIZE (MAX_XDP_ACTION_SIZE) * XFA_MAX_NUM /* We consider the maximum number of actions that can be applied to single flow */
+
 struct xdp_flow_action {
     __u8 type; /* Determine the type of attr - enum ovs_action_attr*/
     __u8 len; /* len of the whole xdp_flow_action as a multiple of u8 */
     __u8 data[MAX_XDP_ACTION_SIZE]; /* contains the attr, where data points at the start*/
 };
-
-#define MAX_ACTION_SIZE (MAX_XDP_ACTION_SIZE) * 4 /* We consider the maximum number of actions that can be applied to single flow */
 
 struct xdp_flow_actions {
     __u8 len;
@@ -539,4 +540,26 @@ int ovs_flow_key_update(struct xdp_md *ctx, struct xdp_flow_key *key);
 // int ovs_flow_key_extract_userspace(struct net *net, const struct nlattr *attr,
 //                    struct xdp_md *ctx,
 //                    struct xdp_flow_key *key, bool log);
+
+/* Define logs */
+#define LOG_MSG_SIZE 96
+
+enum log_level {
+    ERR = 1 << 0,
+    INFO = 1 << 1,
+    WARN = 1 << 2,
+    DEBUG = 1 << 3
+};
+
+#define LOG_ERR 0x0101
+#define LOG_INFO 0x0102
+#define LOG_WARN 0x0103
+#define LOG_DEBUG 0x0104
+#define LOG_EXTRACTED_KEY 0x1001
+#define LOG_RETRIEVED_ACTION 0x1002
+#define LOG_RECEIVED_PKT 0x1003
+#define LOG_UPCALLED_PKT 0x1004
+#define LOG_MICRO_MISS_KEY 0x1005
+#define LOG_MACRO_MISS_KEY 0x1006
+
 #endif /* flow.h */

@@ -245,7 +245,7 @@ xdp_libxdp_la_SOURCES =
 
 xdp_libxdp_la_LIBADD = \
     xdp/libxdpuser.la \
-    xdp/actions.o \
+	xdp/tail_prog.o \
     xdp/entry-point.o
 
 lib_LTLIBRARIES += xdp/libxdpuser.la
@@ -254,6 +254,7 @@ xdp_libxdpuser_la_SOURCES = \
 	xdp/dynamic-string.h \
 	xdp/dynamic-string.c \
 	xdp/xdp_user_helpers.h \
+	xdp/xf.h \
     xdp/datapath.c \
 	xdp/datapath.h \
     xdp/flow-table.c \
@@ -270,7 +271,7 @@ xdp_libxdpuser_la_LDFLAGS = \
         $(AM_LDFLAGS)
 	
 XDP_TARGETS = \
-	xdp/actions \
+	xdp/tail_prog \
 	xdp/entry-point
 
 LLC ?= llc
@@ -308,14 +309,14 @@ EXTRA_DIST += \
 	xdp/parsing_xdp_key_helpers.h \
 	xdp/parsing_helpers.h \
 	xdp/rewrite_helpers.h \
-	xdp/tail_actions.h \
+	xdp/xf_kern.h \
 	xdp/xdp_kern_helpers.h \
 	$(XDP_C)
 
 dist_xdp_DATA += \
-	xdp/actions.o \
+	xdp/tail_prog.o \
 	xdp/entry-point.o
 
 CLEANFILES += \
-	xdp/actions.ll \
+	xdp/tail_prog.ll \
 	xdp/entry-point.ll

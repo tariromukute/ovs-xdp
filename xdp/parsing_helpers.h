@@ -48,8 +48,9 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh, void *data_end,
     /* Byte-count bounds check; check if current pointer + size of header
      * is after data_end.
      */
-    if (nh->pos + hdrsize > data_end)
+    if (nh->pos + hdrsize > data_end) {
         return -1;
+    }
 
     nh->pos += hdrsize;
     *ethhdr = eth;
@@ -61,11 +62,13 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh, void *data_end,
          */
         #pragma unroll
         for (i = 0; i < VLAN_MAX_DEPTH; i++) {
-                if (!proto_is_vlan(h_proto))
-                        break;
+                if (!proto_is_vlan(h_proto)) {
+                    break;
+                }
 
-                if (vlh + 1 > data_end)
-                        break;
+                if (vlh + 1 > data_end) {
+                    break;
+                }
 
                 h_proto = vlh->h_vlan_encapsulated_proto;
                 vlh++;
@@ -81,8 +84,9 @@ static __always_inline int parse_arp_ethhdr(struct hdr_cursor *nh,
 {
     struct arp_ethhdr *arph = nh->pos;
 
-    if (arph + 1 > data_end)
+    if (arph + 1 > data_end) {
         return -1;
+    }
 
 
     nh->pos = arph + 1;
@@ -117,14 +121,15 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
     struct iphdr *iph = nh->pos;
     int hdrsize;
 
-    if (iph + 1 > data_end)
+    if (iph + 1 > data_end) {
         return -1;
+    }
 
-        hdrsize = iph->ihl * 4;
+    hdrsize = iph->ihl * 4;
 
-        /* Variable-length IPv4 header, need to use byte-based arithmetic */
-        if (nh->pos + hdrsize > data_end)
-                return -1;
+    /* Variable-length IPv4 header, need to use byte-based arithmetic */
+    if (nh->pos + hdrsize > data_end)
+        return -1;
 
     nh->pos += hdrsize;
     *iphdr = iph;
@@ -233,11 +238,11 @@ static __always_inline int parse_nshhdr(struct hdr_cursor *nh,
     if (nshh + hdrsize > data_end)
         return -1;
         
-        hdrsize = nsh_hdr_len(nshh) * 4;
+    hdrsize = nsh_hdr_len(nshh) * 4;
 
-        /* Variable-length IPv4 header, need to use byte-based arithmetic */
-        if (nh->pos + hdrsize > data_end)
-                return -1;
+    /* Variable-length IPv4 header, need to use byte-based arithmetic */
+    if (nh->pos + hdrsize > data_end)
+        return -1;
 
     nh->pos += hdrsize;
     *nshhdr = nshh;

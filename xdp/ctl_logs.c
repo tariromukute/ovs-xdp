@@ -98,7 +98,7 @@ int logs_cmd(int argc, char **argv, void *params)
     return 0;
 }
 
-struct log_level
+struct level
 {
     int info;
     int error;
@@ -147,7 +147,7 @@ struct option_wrapper list_logs_options[] = {
     {{"error", no_argument, 0, 'e'}, "Show error logs", ""},
     {{0, 0, 0, 0}, "", ""}};
 
-static int parse_list_logs_options(int argc, char **argv, struct log_level *level)
+static int parse_list_logs_options(int argc, char **argv, struct level *level)
 {
     int error = 0;
     struct option *long_options;
@@ -218,7 +218,7 @@ out:
     return error;
 }
 
-struct log_level level;
+struct level level;
 int list_logs_cmd(int argc, char **argv, void *params)
 {
     char *description = "Prints out the logs from the datapath. It can print all logs\n\
