@@ -46,8 +46,8 @@
 /* map #0 */
 struct micro_flow_map {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct xf_key);
-    __type(value, struct xfa_buf);
+    __uint(key_size, sizeof(struct xf_key));
+    __uint(value_size, sizeof(struct xfa_buf));
     __uint(max_entries, 100);
 } xf_micro_map SEC(".maps");
 
@@ -59,12 +59,19 @@ struct macro_flow_map {
     __uint(max_entries, 100);
 } _xf_macro_map SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(key_size, sizeof(__u32));
+    __uint(value_size, sizeof(struct xfa_buf));
+    __uint(max_entries, 1);
+} _xfa_buf_map SEC(".maps");
+
 /* map #2 */
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);
     __uint(key_size, sizeof(__u32));
     __uint(value_size, sizeof(__u32));
-    __uint(max_entries, TAIL_TABLE_SIZE);
+    __uint(max_entries, XDP_ACTION_ATTR_MAX);
 } xf_tail_map SEC(".maps");
 
 /* NOTE: loading a xdp program for afxdp depends on the map being
@@ -95,7 +102,7 @@ struct {
 
 // /* Header cursor to keep track of current parsing position */
 // struct hdr_cursor {
-// 	void *pos;
+//     void *pos;
 // };
 
 static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, struct xf_key *key)
@@ -297,17 +304,19 @@ struct S {
     __u16 cookie;
     __u16 pkt_len;
     __u16 data_len; // the length of the data
-    __u8 data[]; // the data being sent via perf
+    __u8 data[XFA_BUF_MAX_SIZE]; // the data being sent via perf
 } __attribute__((packed));
 
-static void __always_inline logger(struct xdp_md *ctx, __u16 log_type,
+static __always_inline int logger(struct xdp_md *ctx, __u16 log_type,
                                 void *metadata, __u32 size)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
 
     if (data_end > data) {
-
+        struct S log;
+        memset(&log, 0, sizeof(log));
+        int data_len = (__u16)MIN(size, sizeof(log.data));
         /* The XDP perf_event_output handler will use the upper 32 bits
             * of the flags argument as a number of bytes to include of the
             * packet payload in the event data. If the size is too big, the
@@ -319,26 +328,32 @@ static void __always_inline logger(struct xdp_md *ctx, __u16 log_type,
             * will be indexed by the CPU number in the event map.
             */
         
+            
         // TODO: check if size is not too big
-        struct S metadata;
-        metadata.cookie = log_type;
-        metadata.pkt_len = (__u16)MIN(data_end - data, SAMPLE_SIZE);
-        metadata.data_len = size;
-        memcpy(&metadata.data, &metadata, size);
+        if (size > sizeof(log.data))
+            return -1;
+        
+        log.cookie = log_type;
+        log.pkt_len = (__u16)MIN(data_end - data, SAMPLE_SIZE);
+        log.data_len = data_len;
+
+        memcpy(log.data, metadata, data_len);
 
         __u64 flags = BPF_F_CURRENT_CPU;
         __u16 sample_size;
-        sample_size = MIN(metadata.pkt_len, SAMPLE_SIZE);
+        sample_size = 0; // MIN(log.pkt_len, SAMPLE_SIZE);
         flags |= (__u64)sample_size << 32;
 
         int ret = bpf_perf_event_output(ctx, &_perf_map, flags,
-                        &metadata, sizeof(metadata));
+                        &log, sizeof(struct S));
         if (ret) {
             bpf_printk("Error: perf_event_output failed: %d\n", ret);
         }
     } else {
         bpf_printk("Error: Could not log data");
     }
+
+    return 0;
 }
 
 #define SAMPLE_SIZE 64ul
@@ -480,28 +495,31 @@ static __always_inline void tail_action(struct xdp_md *ctx)
     // No more actions, exiting
 }
 
+static __always_inline int tail_action_prog__(struct xdp_md *ctx)
+{
+    /* read the current action from map */
+    __u32 key = 0;
+    struct xfa_buf *acts = bpf_map_lookup_elem(&_xfa_buf_map, &key);
+    if (!acts)
+        return -1;
+    /* These keep track of the next header type and iterator pointer */
+
+    int xfa_type = xfa_next(acts);
+    if (xfa_type < 0)
+        return -1;
+
+    return xfa_type;
+}
+
 static __always_inline void tail_action_prog(struct xdp_md *ctx)
 {
     
-    void *data_end = (void *)(long)ctx->data_end;
-    void *data = (void *)(long)ctx->data;
-
-    /* These keep track of the next header type and iterator pointer */
-
-    struct xfa_buf *acts;
-    if (data + sizeof(struct xfa_buf) > data_end)
-        goto out;
-
-    acts = (struct xfa_buf *) data;
-    __u32 xfa_type = xfa_next(acts);
-    if (xfa_type < 0)
-        goto out;
+    int xfa_type = tail_action_prog__(ctx);
 
     if (xfa_type > 0 && xfa_type <= XDP_ACTION_ATTR_MAX) {
         bpf_tail_call(ctx, &xf_tail_map, xfa_type);
     }
 
-out:
     if (log_level & LOG_ERR) {
         char msg[LOG_MSG_SIZE] = "tail_action_prog tail program could not tail to next program";
         logger(ctx, LOG_ERR, msg, LOG_MSG_SIZE);

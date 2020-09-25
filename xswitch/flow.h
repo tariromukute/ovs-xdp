@@ -541,25 +541,5 @@ int ovs_flow_key_update(struct xdp_md *ctx, struct xdp_flow_key *key);
 //                    struct xdp_md *ctx,
 //                    struct xdp_flow_key *key, bool log);
 
-/* Define logs */
-#define LOG_MSG_SIZE 96
-
-enum log_level {
-    ERR = 1 << 0,
-    INFO = 1 << 1,
-    WARN = 1 << 2,
-    DEBUG = 1 << 3
-};
-
-#define LOG_ERR 0x0101
-#define LOG_INFO 0x0102
-#define LOG_WARN 0x0103
-#define LOG_DEBUG 0x0104
-#define LOG_EXTRACTED_KEY 0x1001
-#define LOG_RETRIEVED_ACTION 0x1002
-#define LOG_RECEIVED_PKT 0x1003
-#define LOG_UPCALLED_PKT 0x1004
-#define LOG_MICRO_MISS_KEY 0x1005
-#define LOG_MACRO_MISS_KEY 0x1006
 
 #endif /* flow.h */
