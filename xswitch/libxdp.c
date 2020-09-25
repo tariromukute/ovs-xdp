@@ -26,7 +26,7 @@
 #include <bpf/btf.h>
 #include "libxdp.h"
 #include "prog_dispatcher.h"
-#include "headers/err.h" /* ERR_PTR */
+#include "err.h" /* ERR_PTR */
 
 #define XDP_RUN_CONFIG_SEC ".xdp_run_config"
 

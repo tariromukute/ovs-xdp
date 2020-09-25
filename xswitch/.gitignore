@@ -1,2 +1,5 @@
 /xdp_logger
 /xdp-ctl
+/xdp-loader
+/xdp-dispatcher.c
+/stamp-*
