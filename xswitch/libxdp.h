@@ -42,12 +42,32 @@
 
 /* These are stored into IFLA_XDP_ATTACHED on dump. */
 enum {
-	XDP_ATTACHED_NONE = 0,
-	XDP_ATTACHED_DRV,
-	XDP_ATTACHED_SKB,
-	XDP_ATTACHED_HW,
-	XDP_ATTACHED_MULTI,
+    XDP_ATTACHED_NONE = 0,
+    XDP_ATTACHED_DRV,
+    XDP_ATTACHED_SKB,
+    XDP_ATTACHED_HW,
+    XDP_ATTACHED_MULTI,
 };
+
+
+/* NOTE: OpenVSwitch forbides the use of the zu etc directly, hence to allow it to 
+ * compile will use these definitions adapted from ./lib/util.h of OpenVSwitch */
+/* Use "%"PRIuSIZE to format size_t with printf(). */
+#ifdef _WIN32
+#define PRIdSIZE "Id"
+#define PRIiSIZE "Ii"
+#define PRIoSIZE "Io"
+#define PRIuSIZE "Iu"
+#define PRIxSIZE "Ix"
+#define PRIXSIZE "IX"
+#else
+#define PRIdSIZE "zd"
+#define PRIiSIZE "zi"
+#define PRIoSIZE "zo"
+#define PRIuSIZE "zu"
+#define PRIxSIZE "zx"
+#define PRIXSIZE "zX"
+#endif
 
 enum xdp_attach_mode {
                       XDP_MODE_UNSPEC = 0,
@@ -63,7 +83,7 @@ enum libxdp_print_level {
         LIBXDP_DEBUG,
 };
 typedef int (*libxdp_print_fn_t)(enum libxdp_print_level level,
-				 const char *, va_list ap);
+                 const char *, va_list ap);
 
 libxdp_print_fn_t libxdp_set_print(libxdp_print_fn_t fn);
 
@@ -76,13 +96,13 @@ int libxdp_strerror(int err, char *buf, size_t size);
 
 
 struct xdp_program *xdp_program__from_bpf_obj(struct bpf_object *obj,
-					      const char *section_name);
+                          const char *section_name);
 struct xdp_program *xdp_program__find_file(const char *filename,
-					   const char *section_name,
-					   struct bpf_object_open_opts *opts);
+                       const char *section_name,
+                       struct bpf_object_open_opts *opts);
 struct xdp_program *xdp_program__open_file(const char *filename,
-					   const char *section_name,
-					   struct bpf_object_open_opts *opts);
+                       const char *section_name,
+                       struct bpf_object_open_opts *opts);
 struct xdp_program *xdp_program__from_fd(int fd);
 struct xdp_program *xdp_program__from_id(__u32 prog_id);
 struct xdp_program *xdp_program__from_pin(const char *pin_path);
@@ -101,13 +121,13 @@ unsigned int xdp_program__run_prio(const struct xdp_program *xdp_prog);
 int xdp_program__set_run_prio(struct xdp_program *xdp_prog,
                               unsigned int run_prio);
 bool xdp_program__chain_call_enabled(const struct xdp_program *xdp_prog,
-				     enum xdp_action action);
+                     enum xdp_action action);
 int xdp_program__set_chain_call_enabled(struct xdp_program *prog,
                                         unsigned int action,
                                         bool enabled);
 int xdp_program__print_chain_call_actions(const struct xdp_program *prog,
-					  char *buf,
-					  size_t buf_len);
+                      char *buf,
+                      size_t buf_len);
 int xdp_program__pin(struct xdp_program *xdp_prog, const char *pin_path);
 int xdp_program__attach(struct xdp_program *xdp_prog,
                         int ifindex, enum xdp_attach_mode mode,
@@ -124,7 +144,7 @@ int xdp_program__detach_multi(struct xdp_program **progs, size_t num_progs,
 
 struct xdp_multiprog *xdp_multiprog__get_from_ifindex(int ifindex);
 struct xdp_program *xdp_multiprog__next_prog(const struct xdp_program *prog,
-					     const struct xdp_multiprog *mp);
+                         const struct xdp_multiprog *mp);
 void xdp_multiprog__close(struct xdp_multiprog *mp);
 int xdp_multiprog__detach(struct xdp_multiprog *mp);
 enum xdp_attach_mode xdp_multiprog__attach_mode(const struct xdp_multiprog *mp);

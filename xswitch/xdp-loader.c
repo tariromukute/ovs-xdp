@@ -89,7 +89,7 @@ int do_load(const void *cfg, const char *pin_root_path)
         return EXIT_FAILURE;
     }
 
-    pr_debug("Loading %zu files on interface '%s'.\n",
+    pr_debug("Loading %"PRIuSIZE" files on interface '%s'.\n",
          num_progs, opt->iface.ifname);
 
     /* libbpf spits out a lot of unhelpful error messages while loading.
@@ -129,8 +129,7 @@ retry:
             bpf_object__for_each_map(map, xdp_program__bpf_obj(p)) {
                 err = bpf_map__set_pin_path(map, NULL);
                 if (err) {
-                    pr_warn("Error clearing map pin path: %s\n",
-                        strerror(-err));
+                    pr_warn("Error clearing map pin path\n");
                     goto out;
                 }
             }
@@ -210,8 +209,7 @@ int do_unload(const void *cfg, const char *pin_root_path)
          (xdp_program__id(xdp_multiprog__main_prog(mp)) == opt->prog_id))) {
         err = xdp_multiprog__detach(mp);
         if (err) {
-            pr_warn("Unable to detach XDP program: %s\n",
-                strerror(-err));
+            pr_warn("Unable to detach XDP program\n");
             goto out;
         }
     } else {
@@ -232,8 +230,7 @@ int do_unload(const void *cfg, const char *pin_root_path)
         err = xdp_program__detach(prog, opt->iface.ifindex,
                       XDP_MODE_UNSPEC, 0);
         if (err) {
-            pr_warn("Unable to detach XDP program: %s\n",
-                strerror(-err));
+            pr_warn("Unable to detach XDP program\n");
             goto out;
         }
     }

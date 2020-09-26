@@ -77,7 +77,7 @@ static int set_rlimit(unsigned int min_limit)
     err = setrlimit(RLIMIT_MEMLOCK, &limit);
     if (err) {
         err = -errno;
-        pr_warn("Couldn't raise rlimit: %s\n", strerror(-err));
+        pr_warn("Couldn't raise rlimit\n");
         return err;
     }
 
@@ -197,7 +197,7 @@ int attach_xdp_program(struct xdp_program *prog, const struct iface *iface,
 
     err = make_dir_subdir(pin_root_path, "programs");
     if (err) {
-        pr_warn("Unable to create pin directory: %s\n", strerror(-err));
+        pr_warn("Unable to create pin directory\n");
         return err;
     }
 
@@ -220,8 +220,8 @@ int attach_xdp_program(struct xdp_program *prog, const struct iface *iface,
 
     err = xdp_program__pin(prog, pin_path);
     if (err) {
-        pr_warn("Unable to pin XDP program at %s: %s\n",
-            pin_path, strerror(-err));
+        pr_warn("Unable to pin XDP program at %s\n",
+            pin_path);
         goto unload;
     }
     pr_debug("XDP program pinned at %s\n", pin_path);
@@ -285,8 +285,8 @@ int get_pinned_program(const struct iface *iface, const char *pin_root_path,
     dr = opendir(pin_path);
     if (!dr) {
         err = -errno;
-        pr_debug("Couldn't open pin directory %s: %s\n",
-             pin_path, strerror(-err));
+        pr_debug("Couldn't open pin directory %s\n",
+             pin_path);
         return err;
     }
 
@@ -321,8 +321,8 @@ int get_pinned_program(const struct iface *iface, const char *pin_root_path,
         if (IS_ERR_OR_NULL(prog) ||
             !(m = xdp_program__is_attached(prog, iface->ifindex))) {
             ret = IS_ERR(prog) ? PTR_ERR(prog) : -ENOENT;
-            pr_debug("Program %s no longer loaded on %s: %s\n",
-                 de->d_name, iface->ifname, strerror(-ret));
+            pr_debug("Program %s no longer loaded on %s\n",
+                 de->d_name, iface->ifname);
             err = unlink(pin_path);
             if (err)
                 ret = err;
@@ -410,7 +410,7 @@ int iterate_iface_multiprogs(multiprog_callback cb, void *arg)
     indexes = if_nameindex();
     if (!indexes) {
         err = -errno;
-        pr_warn("Couldn't get list of interfaces: %s\n", strerror(-err));
+        pr_warn("Couldn't get list of interfaces\n");
         return err;
     }
 
@@ -425,8 +425,8 @@ int iterate_iface_multiprogs(multiprog_callback cb, void *arg)
         if (IS_ERR_OR_NULL(mp)) {
             if (PTR_ERR(mp) != -ENOENT) {
                 err = PTR_ERR(mp);
-                pr_warn("Error getting XDP status for interface %s: %s\n",
-                    idx->if_name, strerror(-err));
+                pr_warn("Error getting XDP status for interface %s\n",
+                    idx->if_name);
                 goto out;
             }
             mp = NULL;
@@ -511,7 +511,7 @@ static int bpf_mnt_check_target(const char *target)
     ret = mkdir(target, S_IRWXU);
     if (ret && errno != EEXIST) {
         ret = -errno;
-        pr_warn("mkdir %s failed: %s\n", target, strerror(-ret));
+        pr_warn("mkdir %s failed\n", target);
         return ret;
     }
 
@@ -595,8 +595,8 @@ int unlink_pinned_map(int dir_fd, const char *map_name)
         return 0;
     } else if (err) {
         err = -errno;
-        pr_warn("Couldn't stat pinned map %s: %s\n",
-            map_name, strerror(-err));
+        pr_warn("Couldn't stat pinned map %s\n",
+            map_name);
         return err;
     }
 
@@ -604,8 +604,8 @@ int unlink_pinned_map(int dir_fd, const char *map_name)
     err = unlinkat(dir_fd, map_name, 0);
     if (err) {
         err = -errno;
-        pr_warn("Couldn't unlink pinned map %s: %s\n",
-            map_name, strerror(-err));
+        pr_warn("Couldn't unlink pinned map %s\n",
+            map_name);
         return -errno;
     }
 
@@ -681,7 +681,7 @@ void prog_lock_release(int signal)
     err = unlink(prog_lock_file);
     if (err) {
         err = -errno;
-        pr_warn("Unable to unlink lock file: %s\n", strerror(-err));
+        pr_warn("Unable to unlink lock file\n");
         goto out;
     }
 
@@ -730,7 +730,7 @@ int prog_lock_get(const char *progname)
         sigaction(SIGFPE, &sigact, NULL) ||
         sigaction(SIGTERM, &sigact, NULL)) {
         err = -errno;
-        pr_warn("Unable to install signal handler: %s\n", strerror(-err));
+        pr_warn("Unable to install signal handler\n");
         return err;
     }
 
@@ -746,8 +746,7 @@ int prog_lock_get(const char *progname)
             fd = open(prog_lock_file, O_RDONLY);
             if (fd < 0) {
                 err = -errno;
-                pr_warn("Unable to open lockfile for reading: %s\n",
-                    strerror(-err));
+                pr_warn("Unable to open lockfile for reading\n");
                 return err;
             }
 
@@ -759,14 +758,13 @@ int prog_lock_get(const char *progname)
             }
             if (!pid || errno) {
                 err = -errno;
-                pr_warn("Unable to read PID from lockfile: %s\n",
-                    strerror(-err));
+                pr_warn("Unable to read PID from lockfile\n");
                 return err;
             }
             pr_warn("Unable to get program lock: Already held by pid %lu\n",
                 pid);
         } else {
-            pr_warn("Unable to get program lock: %s\n", strerror(-err));
+            pr_warn("Unable to get program lock\n");
         }
         return err;
     }
@@ -774,14 +772,14 @@ int prog_lock_get(const char *progname)
     err = dprintf(prog_lock_fd, "%d\n", prog_pid);
     if (err < 0) {
         err = -errno;
-        pr_warn("Unable to write pid to lock file: %s\n", strerror(-err));
+        pr_warn("Unable to write pid to lock file\n");
         goto out_err;
     }
 
     err = fsync(prog_lock_fd);
     if (err) {
         err = -errno;
-        pr_warn("Unable fsync() lock file: %s\n", strerror(-err));
+        pr_warn("Unable fsync() lock file\n");
         goto out_err;
     }
 
