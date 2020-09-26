@@ -990,6 +990,7 @@ static int find_bpf_file(char *buf, size_t buf_size, const char *progname)
 #ifdef DEBUG
         ".",
 #endif
+        ".",
         BPF_OBJECT_PATH,
         NULL
     };
@@ -1004,7 +1005,7 @@ static int find_bpf_file(char *buf, size_t buf_size, const char *progname)
                 return 0;
     }
 
-    pr_warn("Couldn't find a BPF file with name %s\n", progname);
+    pr_warn("Couldn't find a BPF file with name %s in path %s\n", progname, path);
     return -ENOENT;
 }
 

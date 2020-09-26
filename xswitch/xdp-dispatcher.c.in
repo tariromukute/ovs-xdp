@@ -13,8 +13,6 @@ divert(0)dnl
 
 #include "prog_dispatcher.h"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Winvalid-pp-token"
 /* While 'const volatile' sounds a little like an oxymoron, there's reason
  * behind the madness:
  *
@@ -59,6 +57,5 @@ out:
         return XDP_PASS;
 }
 
-#pragma GCC diagnostic pop
 char _license[] SEC("license") = "GPL";
 __uint(dispatcher_version, XDP_DISPATCHER_VERSION) SEC(XDP_METADATA_SECTION);

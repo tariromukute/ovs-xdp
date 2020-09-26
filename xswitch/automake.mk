@@ -286,11 +286,7 @@ xswitch_libxswitchuser_la_SOURCES = \
 	xswitch/util.h \
 	xswitch/util.c \
 	xswitch/xdp_helpers.h \
-	xswitch/err.h \
-	xswitch/xdp-dispatcher.c
-
-# nodist_libxswitchuser_SOURCES = \
-#	 xswitch/xdp-dispatcher.c
+	xswitch/err.h
 
 # Build xdp-dispatcher.c from xdp-dispatcher.c.in
 # Adapted the make config from the xdp-tools git repo
@@ -319,7 +315,8 @@ XDP_TARGETS = \
 	xswitch/tail_prog \
 	xswitch/ep_inline_actions \
 	xswitch/ep_tail_actions \
-	xswitch/entry-point
+	xswitch/entry-point \
+	xswitch/xdp-dispatcher
 
 LLC ?= llc
 CLANG ?= clang
