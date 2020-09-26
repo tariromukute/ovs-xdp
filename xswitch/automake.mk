@@ -359,6 +359,7 @@ EXTRA_DIST += \
 	xswitch/xf_kern.h \
 	xswitch/actions.h \
 	xswitch/xdp_kern_helpers.h \
+	xswitch/xdp-dispatcher.c.in \
 	$(XDP_C)
 
 dist_xswitch_DATA += \
@@ -372,4 +373,6 @@ CLEANFILES += \
 	xswitch/ep_inline_actions.ll \
 	xswitch/ep_tail_actions.ll \
 	xswitch/entry-point.ll \
-	xswitch/xdp-dispatcher.c
+	xswitch/xdp-dispatcher.c \
+	xswitch/xdp-loader \
+	xswitch/stamp-h2

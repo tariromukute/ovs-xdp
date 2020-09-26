@@ -16,7 +16,7 @@
 #include <dirent.h>
 #include <net/if.h>
 
-#include "headers/err.h" /* ERR_PTR */
+#include "err.h" /* ERR_PTR */
 #include "util.h"
 #include "logging.h"
 

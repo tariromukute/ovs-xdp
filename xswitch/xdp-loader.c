@@ -12,7 +12,7 @@
 #include <bpf/libbpf.h>
 
 #include "libxdp.h"
-#include "headers/err.h"
+#include "err.h"
 #include "params.h"
 #include "logging.h"
 #include "util.h"
