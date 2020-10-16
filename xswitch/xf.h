@@ -116,6 +116,7 @@ struct xf_key_arp {
     __be16 ar_op;
     __u8   arp_sha[6];
     __u8   arp_tha[6];
+    __u8 pad[2];
 };
 
 struct xf_key_nd {
@@ -440,10 +441,21 @@ enum log_level {
     DEBUG = 1 << 3
 };
 
-#define LOG_ERR 0x0101
-#define LOG_INFO 0x0102
-#define LOG_WARN 0x0103
-#define LOG_DEBUG 0x0104
+// #define LOG_ERR 0x0101
+// #define LOG_INFO 0x0102
+// #define LOG_WARN 0x0103
+// #define LOG_DEBUG 0x0104
+enum logging_print_level {
+    LOG_WARN,
+    LOG_INFO,
+    LOG_DEBUG,
+    LOG_VERBOSE,
+    LOG_ERR,
+    LOG_XF_KEY,
+    LOG_XF_ACT,
+    LOG_PKT
+};
+
 #define LOG_EXTRACTED_KEY 0x1001
 #define LOG_RETRIEVED_ACTION 0x1002
 #define LOG_RECEIVED_PKT 0x1003
@@ -477,6 +489,8 @@ struct xf_hdr {
     __u32 len;
 } __attribute__((packed));
 
+#define XF_HDR_LEN sizeof(struct xf_hdr)
+
 /* xdp flow action */
 struct xf_act {
     struct xf_hdr hdr;
@@ -491,9 +505,19 @@ struct xfa_cursor {
     __u32 offset;
 };
 
+struct xfa_hdr {
+    __u32 len;
+    __u32 num;
+};
+
+struct xfa_cur {
+    __u32 cnt;
+    __u32 offset;
+};
+
 /* xdp flow actions buffer for storing the list of action for a given flow */
 struct xfa_buf {
-    struct xfa_cursor cursor;
+    struct xfa_hdr hdr;
     __u8 data[XFA_BUF_MAX_SIZE];
 };
 
@@ -506,14 +530,19 @@ struct xf_upcall {
     /* Follwed by pkt_len of packet data */
 };
 
+struct xf {
+    struct xf_key key;
+    struct xfa_buf actions;
+};
+
 /* extracts and returns the type of action being pointed to by the cursor (current action) */
-static __always_inline int xfa_type(struct xfa_buf *acts)
+static __always_inline int xfa_type(struct xfa_buf *acts, struct xfa_cur *cursor)
 {
     __u32 pos = 0;
-    if (pos + acts->cursor.offset > XFA_BUF_MAX_SIZE)
+    if (pos + cursor->offset > XFA_BUF_MAX_SIZE)
         return -1;
 
-    pos += acts->cursor.offset;
+    pos += cursor->offset;
 
     // Point cursor to current action header
     if (pos + sizeof (struct xf_hdr) > XFA_BUF_MAX_SIZE) {
@@ -526,13 +555,13 @@ static __always_inline int xfa_type(struct xfa_buf *acts)
 }
 
 /* extracts the length of the action being pointed to by the cursor (current action) */
-static __always_inline int xfa_len(struct xfa_buf *acts)
+static __always_inline int xfa_len(struct xfa_buf *acts, struct xfa_cur *cursor)
 {
     __u32 pos = 0;
-    if (pos + acts->cursor.offset > XFA_BUF_MAX_SIZE)
+    if (pos + cursor->offset > XFA_BUF_MAX_SIZE)
         return -1;
 
-    pos += acts->cursor.offset;
+    pos += cursor->offset;
 
     // Point cursor to current action header
     if (pos + sizeof (struct xf_hdr) > XFA_BUF_MAX_SIZE) {
@@ -545,13 +574,13 @@ static __always_inline int xfa_len(struct xfa_buf *acts)
 }
 
 /* extracts the action being pointed to by the cursor (current action) */
-static __always_inline int xfa_data(struct xfa_buf *acts, void *act, __u32 size)
+static __always_inline int xfa_data(struct xfa_buf *acts, struct xfa_cur *cursor, void *act, __u32 size)
 {
     __u32 pos = 0;
-    if (pos + acts->cursor.offset > XFA_BUF_MAX_SIZE)
+    if (pos + cursor->offset > XFA_BUF_MAX_SIZE)
         return -1;
 
-    pos += acts->cursor.offset;
+    pos += cursor->offset;
 
     // Point cursor to current action header
     if (pos + sizeof (struct xf_hdr) > XFA_BUF_MAX_SIZE) {
@@ -576,16 +605,16 @@ static __always_inline int xfa_data(struct xfa_buf *acts, void *act, __u32 size)
 
 /* advances to the cursor to point to the next action extracts the type of action  
  * returns -1 when there is no next */
-static __always_inline int xfa_next(struct xfa_buf *acts)
+static __always_inline int xfa_next(struct xfa_buf *acts, struct xfa_cur *cursor)
 {
     if (!acts)
         return -1;
 
     __u32 pos = 0;
-    if (pos + acts->cursor.offset > XFA_BUF_MAX_SIZE)
+    if (pos + cursor->offset > XFA_BUF_MAX_SIZE)
         return -1;
 
-    pos += acts->cursor.offset;
+    pos += cursor->offset;
 
     
 
@@ -601,7 +630,7 @@ static __always_inline int xfa_next(struct xfa_buf *acts)
     }
     memcpy(&hdr, acts->data, sizeof(hdr));
     // acts->cursor.offset += hdr->len;
-    acts->cursor.cnt += 1;
+    cursor->cnt += 1;
 
     int ret = hdr.type;
     return ret; 
@@ -610,75 +639,67 @@ static __always_inline int xfa_next(struct xfa_buf *acts)
 /* advances the cursor to the next action and puts the action in the buf and
  * returns the type of the action. The initial call will advance the cursor to
  * the first action in the buffer */
-static __always_inline __u32 xfa_next_data(void *data, struct xf_act *act)
+static __always_inline int xfa_next_data(struct xfa_buf *acts, struct xfa_cur *cursor, struct xf_act *act)
 {
-    struct xfa_buf *acts = data;
-    __u32 pos = 0;
-    if (pos + acts->cursor.offset > XFA_BUF_MAX_SIZE)
+    if (cursor->cnt >= acts->hdr.num)
         return 0;
 
-    pos += acts->cursor.offset;
+    // struct xfa_buf *acts = data;
+    __u32 index = 0;
+    if (index + cursor->offset > XFA_BUF_MAX_SIZE)
+        return -1;
+    
+
+    index += cursor->offset;
 
     // Point cursor to current action header
-    if (pos + sizeof (struct xf_act) > XFA_BUF_MAX_SIZE) {
-        return 0;
+    if (index + sizeof(struct xf_act) > XFA_BUF_MAX_SIZE) {
+        return -1;
     }
-    // void *ptr = (void *) &acts->data[pos];
-    if (&acts->data[pos] + sizeof (struct xf_act) > &acts->data[XFA_BUF_MAX_SIZE])
-        return 0;
 
-    struct xf_hdr *hdr = (struct xf_hdr *) &acts->data[pos];
-    // struct xf_hdr hdr;
-    // memset(&hdr, 0, sizeof(struct xf_hdr));
-    // memcpy(&hdr, acts->data, sizeof(struct xf_hdr));
-    // void *ptr = (void *)acts->data;
-    // struct xf_hdr *hdr = ptr;
-    // hdr->len++;
+    memset(act, 0, sizeof(struct xf_act));
+    memcpy(act, acts->data + index, sizeof(struct xf_act));
 
-    // hdr.type = (__u32) acts->data[pos];
-    // hdr.len = (__u32) acts->data[pos++];
-    // __u32 *ptr = (__u32 *)&acts->data[pos];
-    // struct xf_hdr *hdr = ptr;
-    
-    // acts->cursor.offset += hdr->len;
-    // acts->cursor.cnt += 1;
+    cursor->offset += act->hdr.len;
+    cursor->cnt += 1;
 
-    // if (hdr->len > sizeof(struct xf_hdr) && 
-    //     pos + sizeof(struct xf_hdr) + hdr->len > XFA_BUF_MAX_SIZE)
-    //     return -1;
-
-    // pos += sizeof(struct xf_hdr);
-
-    // memcpy(act, &acts->data[pos], hdr->len);
-    // int err = *ptr;
-    // err++;
-    return hdr->type; 
-    // return 0;
+    return act->hdr.type; 
 }
 
 /* puts an action into the xdp actions buffer */
-static __always_inline int xfa_put(struct xfa_buf *acts, void *data, __u32 size)
+static __always_inline int xfa_put(struct xfa_buf *acts, __u32 type, struct xfa_cur *cursor, void *data, __u32 size)
 {
-    if (sizeof(struct xf_hdr) > size)
+    __u32 len = XF_HDR_LEN + size;
+
+    __u32 pos = 0;
+    if (pos + acts->hdr.len > XFA_BUF_MAX_SIZE)
         return -1;
 
-    __u16 pos = 0;
-    if (pos + acts->cursor.len > XFA_BUF_MAX_SIZE)
-        return -1;
-
-    pos += acts->cursor.len;
+    pos += acts->hdr.len;
 
     // Point cursor to current action header
-    if (pos + size > XFA_BUF_MAX_SIZE) {
+    if (pos + len > XFA_BUF_MAX_SIZE) {
         return -1;
     }
 
-    // memcpy(&acts->data[pos], data, size);
+    struct xf_act act;
+    memset(&act, 0, sizeof(struct xf_act));
+    act.hdr.type = type;
+    act.hdr.len = len;
 
-    acts->cursor.len += size;
-    acts->cursor.num += 1;
+    if (size > XFA_MAX_SIZE)
+        return -1;
+
+    if (data) {
+        memcpy(act.data, data, size);
+    }
+
+    memcpy(&acts->data[pos], &act, len);
+
+    acts->hdr.len += len;
+    acts->hdr.num += 1;
     
-    return acts->cursor.num;
+    return acts->hdr.num;
 }
 
 #endif /* XF_H: XDP FLOW*/

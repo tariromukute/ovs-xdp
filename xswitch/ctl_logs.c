@@ -15,6 +15,7 @@
 #include "xdp_user_helpers.h"
 #include "dynamic-string.h"
 #include "flow.h"
+#include "xf.h"
 #include "datapath.h"
 
 #define TRACEFS_PIPE "/sys/kernel/debug/tracing/trace_pipe"
@@ -26,7 +27,7 @@
 #define SAMPLE_SIZE 64ul
 // #define SAMPLE_SIZE sizeof(struct xdp_flow_key)
 
-static const char *pin_basedir = "/sys/fs/bpf";
+static const char *perf_pin_basedir = "/sys/fs/bpf/ovs-xdp";
 static const char *_perf_map = "_perf_map";
 static struct perf_buffer *pb = NULL;
 
@@ -44,21 +45,27 @@ static int list_map_keys()
         goto out;
     }
 
-    int MAX_FLOWS = 10;
+    int MAX_FLOWS = 30;
     int cnt = 0;
-    struct xdp_flow_key key;
-    struct xdp_flow *flow = NULL;
+    struct xf_key key;
+    memset(&key, 0, sizeof(struct xf_key));
+    struct xf *flow = NULL;
     printf("----Printing list of keys in map ----\n");
     while (!error && cnt < MAX_FLOWS)
     {
-        error = xdp_if_flow_next(if_index, &key, &flow);
+        error = xswitch_br__flow_next("ovs-xdp", &key, &flow);
         if (!error)
         {
-            memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
+            memcpy(&key, &flow->key, sizeof(struct xf_key));
             struct ds ds = DS_EMPTY_INITIALIZER;
-            format_key_to_hex(&ds, &key);
+            xdp_flow_key_format(&ds, &key);
             printf("%s \n", ds_cstr(&ds));
             ds_destroy(&ds);
+
+            struct ds dsx = DS_EMPTY_INITIALIZER;
+            ds_put_hex(&dsx, &key, sizeof(struct xf_key));
+            printf("%s \n", ds_cstr(&dsx));
+            ds_destroy(&dsx);
             cnt++;
         }
         else
@@ -116,27 +123,49 @@ static void print_bpf_output(void *ctx, int cpu, void *data, __u32 size)
     struct {
         __u16 cookie;
         __u16 pkt_len;
-        struct xdp_flow_key key;
+        __u16 data_len; // the length of the data
+        __u8 data[XFA_BUF_MAX_SIZE]; // the data being sent via perf
         __u8  pkt_data[SAMPLE_SIZE];
     } __attribute__((packed)) *e = data;
 
     list_map_keys();
-    if (e->cookie == 0xa1ee) {
-        printf("========== Key found in map ============\n");
-    } else if (e->cookie == 0xdead) {
-        printf("========== Key not found in map ============\n");
-    } else {
-        printf("BUG cookie %x sized %d\n", e->cookie, size);
+    if (e->cookie == LOG_XF_KEY) {
+        printf("========== Logging xf key ============\n");
+        struct xf_key key;
+        memcpy(&key, &e->data, sizeof(struct xf_key));
+        struct ds ds = DS_EMPTY_INITIALIZER;
+        xdp_flow_key_format(&ds, &key);
+        printf("%s \n", ds_cstr(&ds));
+        ds_destroy(&ds);
+
+        struct ds dsx = DS_EMPTY_INITIALIZER;
+        ds_put_hex(&dsx, &key, sizeof(struct xf_key));
+        printf("%s \n", ds_cstr(&dsx));
+        ds_destroy(&dsx);
+        printf("=================================================\n");
+    } else if (e->cookie == LOG_XF_ACT) {
+        printf("========== Logging xf action ============\n");
+        struct xf_act act;
+        memcpy(&act, &e->data, sizeof(struct xf_act));
+        // struct ds ds = DS_EMPTY_INITIALIZER;
+        // xdp_flow_key_format(&ds, &key);
+        // printf("%s \n", ds_cstr(&ds));
+        printf("=================================================\n");
+    } else if (e->cookie == LOG_DEBUG) {
+        printf("%s\n", e->data);
+        return;
+    } else if (e->cookie == LOG_INFO) {
+        printf("%s\n", e->data);
+        return;
+    } else if (e->cookie == LOG_WARN) {
+        printf("%s\n", e->data);
+        return;
+    } else if (e->cookie == LOG_ERR) {
+        printf("%s\n", e->data);
         return;
     }
 
-    struct xdp_flow_key key;
-    memcpy(&key, &e->key, sizeof(struct xdp_flow_key));
-    struct ds ds = DS_EMPTY_INITIALIZER;
-    format_key_to_hex(&ds, &key);
-    printf("%s \n", ds_cstr(&ds));
-    printf("=================================================\n");
-    ds_destroy(&ds);
+    printf("level %d\n", e->cookie);
 }
 
 struct option_wrapper list_logs_options[] = {
@@ -226,8 +255,9 @@ int list_logs_cmd(int argc, char **argv, void *params)
     char *use = "xdp-ctl logs list [flags]";
     int error = 0;
 
+    printf("------------------------------------\n");
     char buf[PATH_MAX];
-    int len = snprintf(buf, PATH_MAX, "%s/%s", pin_basedir, _perf_map);
+    int len = snprintf(buf, PATH_MAX, "%s/%s", perf_pin_basedir, _perf_map);
     if (len < 0) {
         error = -EINVAL;
         goto out;
@@ -265,7 +295,8 @@ int list_logs_cmd(int argc, char **argv, void *params)
     kill(0, SIGINT);
     
 out:
-    
+    if (map_fd >= 0)
+        close(map_fd);
     if (error == EINVAL)
         print_cmd_usage(description, use, NULL, list_logs_options);
     return error;

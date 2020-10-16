@@ -78,7 +78,6 @@ static int parse_list_flows_options(int argc, char **argv, struct flow_arguments
     int c;
     for (;;)
     {
-
         int option_index = 0;
         c = getopt_long(argc, argv, "",
                         long_options, &option_index);

@@ -33,12 +33,12 @@ struct config {
     bool xsk_poll_mode;
 };
 
-static const char *default_filename = "entry-point.o";
+// static const char *default_filename = "entry-point.o";
 static const char *action_filename = "actions.o";
-static const char *pin_basedir = "/sys/fs/bpf";
+// static const char *pin_basedir = "/sys/fs/bpf";
 static const char *prog_map_name = "tail_table";
-static const char *stats_map = "stats_map";
-static const char *flow_map = "flow_table";
+// static const char *stats_map = "stats_map";
+// static const char *flow_map = "flow_table";
 static const char *_ports_map = "_ports";
 static const char *port_flow_map = "port_flow";
 // static const char *_perf_map = "_perf_map";
@@ -108,11 +108,13 @@ static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
     ret = xsk_socket__create(&xsk_info->xsk, cfg->ifname,
                  cfg->xsk_if_queue, umem->umem, &xsk_info->rx,
                  &xsk_info->tx, &xsk_cfg);
+    VLOG_INFO("--- Called: %s xsk_socket__create %d ---", __func__, ret);
 
     if (ret)
         goto error_exit;
 
     ret = bpf_get_link_xdp_id(cfg->ifindex, &prog_id, cfg->xdp_flags);
+    VLOG_INFO("--- Called: %s bpf_get_link_xdp_id ret %d prog_id %d ---", __func__, ret, prog_id);
     if (ret)
         goto error_exit;
 
@@ -128,6 +130,7 @@ static struct xsk_socket_info *xsk_configure_socket(struct config *cfg,
                      XSK_RING_PROD__DEFAULT_NUM_DESCS,
                      &idx);
 
+    VLOG_INFO("--- Called: %s xsk_ring_prod__reserve ret %d prog_id %d ---", __func__, ret, prog_id);
     if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
         goto error_exit;
 
@@ -490,31 +493,31 @@ static int load_update_prog_map(const char *filename, struct config *cfg)
     return 0;
 }
 
-static int pinned_map_fd_by_name(struct config *cfg, const char *name)
-{
-    char buf[PATH_MAX];
-    char pin_dir[PATH_MAX];
+// static int pinned_map_fd_by_name(struct config *cfg, const char *name)
+// {
+//     char buf[PATH_MAX];
+//     char pin_dir[PATH_MAX];
 
-    if (name[0] == '_') { // global map
-        strcpy(pin_dir, pin_basedir);
-    } else { // interface/entry point map
-        strcpy(pin_dir, cfg->pin_dir);
-    }
+//     if (name[0] == '_') { // global map
+//         strcpy(pin_dir, pin_basedir);
+//     } else { // interface/entry point map
+//         strcpy(pin_dir, cfg->pin_dir);
+//     }
 
-    // check if map already pinned
-    int len = snprintf(buf, PATH_MAX, "%s/%s", pin_dir, name);
-    if (len < 0)
-    {
-        return -EINVAL;
-    }
-    else if (len >= PATH_MAX)
-    {
-        return -ENAMETOOLONG;
-    }
+//     // check if map already pinned
+//     int len = snprintf(buf, PATH_MAX, "%s/%s", pin_dir, name);
+//     if (len < 0)
+//     {
+//         return -EINVAL;
+//     }
+//     else if (len >= PATH_MAX)
+//     {
+//         return -ENAMETOOLONG;
+//     }
 
-    int fd = bpf_obj_get(buf);
-    return fd;
-}
+//     int fd = bpf_obj_get(buf);
+//     return fd;
+// }
 
 // static bpf_map * pinned_map_by_name(struct config *cfg, const char *name)
 // {

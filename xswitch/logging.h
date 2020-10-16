@@ -3,18 +3,14 @@
 #ifndef __LOGGING_H
 #define __LOGGING_H
 
+#include "xf.h"
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 /* This matches the libbpf logging levels, but with an additional VERBOSE level;
  * we demote all libbpf messages by one level so debug messages only show up on
  * VERBOSE.
  */
-enum logging_print_level {
-    LOG_WARN,
-    LOG_INFO,
-    LOG_DEBUG,
-    LOG_VERBOSE,
-};
 
 extern void logging_print(enum logging_print_level level, const char *format,
               ...) __attribute__((format(printf, 2, 3)));
@@ -28,6 +24,7 @@ extern void logging_print(enum logging_print_level level, const char *format,
 #define pr_info(fmt, ...) __pr(LOG_INFO, fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...) __pr(LOG_DEBUG, fmt, ##__VA_ARGS__)
 
+void init_logging(void);
 void init_lib_logging(void);
 void silence_libbpf_logging(void);
 enum logging_print_level set_log_level(enum logging_print_level level);

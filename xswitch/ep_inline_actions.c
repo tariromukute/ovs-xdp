@@ -19,26 +19,34 @@
 SEC("prog")
 int xdp_ep_inline_actions(struct xdp_md *ctx)
 {
+    bpf_printk("------------------------------------------------\n");
     int action = XDP_PASS;
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
+    struct hdr_cursor nh = { .pos = data };
 
     int err;
-
     struct xf_key key;
     memset(&key, 0, sizeof(struct xf_key));
 
-    err = xfk_extract(data, data_end, &key);
-    if (err)
+    err = xfk_extract(&nh, data_end, &key);
+    if (err) {
+        bpf_printk("Error while extracting key\n");
+        action = XDP_DROP;
         goto out;
+    }
 
-    struct xfa_buf *acts = bpf_map_lookup_elem(&xf_micro_map, &key);
-    if (!acts) /* If there are no flow actions, make an upcall */
+    bpf_printk("Flow key has valid: %d\n", key.valid);
+    
+    struct xfa_buf *acts = bpf_map_lookup_elem(&_xf_macro_map, &key);
+    if (!acts || key.valid & ARP_VALID) /* If there are no flow actions, make an upcall */
     {
-        free(acts);
-        int index = ctx->rx_queue_index;
-
-
+        bpf_printk("Flow entry not found, doing upcall\n");
+        int index = xdp_upcall(ctx, &key);
+        if (index < 0) {
+            goto out;
+        }
+        
         // /* NOTE: if you don't put bpf_redirect_map in the program that you load to on the interface
         //  * and rather put it in a tail program e.g., bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL)
         //  * and you create a xsk_socket for the interface. The xsk_socket seems to be created without an error
@@ -50,23 +58,41 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         //  * helper function why this is, it maybe due to some 'enforced' logic that can be changed */
         if (bpf_map_lookup_elem(&xsks_map, &index))
             return bpf_redirect_map(&xsks_map, index, 0);
+
         goto out;
     }
 
-    bpf_printk("Tail ctx\n");
-    struct xf_act act;
-    memset(&act, 0, sizeof(struct xf_act));
-    // int type = -1;
-    // struct xf_act *actx = (struct xf_act *)&acts->data[0];
-    // type = actx->hdr.type;
-    int ret;
+    bpf_printk("Flow entry found, processing flow actions\n");
 
-        int type = xfa_next_data(acts, &act);
-        // if (type < 0) {
-        //     action = XDP_ABORTED;
-        //     break;
-        // }
-        switch(type) {
+    /* Check that the number of actions is less that the maximum */
+    __u32 num = acts->hdr.num;
+    if (num > XFA_BUF_MAX_NUM) {
+        action = XDP_DROP;
+        goto out;
+    }
+
+    /* Initialise actions cursor */
+    struct xfa_cur cursor = { 0 };
+
+    /* NOTE: if we have the loop iterate for acts->cursor.num and first bound check if num < XFA_BUF_MAX_NUM
+     * the verifier returns error 'The sequence of 8193 jumps is too complex' so just going to have the loop
+     * run for XFA_BUF_MAX_NUM and it will terminate when all the actions have been found. */
+    int index = 0;    
+    for(index = 0; index < XFA_BUF_MAX_NUM; index++) {
+        bpf_printk("Processing actions, loop num: %d cursor cnt %d, cursor total actions: %d", index, cursor.cnt, acts->hdr.num);
+        struct xf_act a;
+        memset(&a, 0, sizeof(struct xf_act));
+        int ret = xfa_next_data(acts, &cursor, &a);
+
+        if (ret < 0) {
+            action = XDP_ABORTED;
+            break;
+        } else if (ret == 0) {
+            break;            
+        }
+
+        bpf_printk("Processing action type: %d\n", a.hdr.type);
+        switch(a.hdr.type) {
             case XDP_ACTION_ATTR_UNSPEC: {
                 ret = xdp_unspec(ctx);
                 if (ret) 
@@ -74,7 +100,7 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
                 break;
             }
             case XDP_ACTION_ATTR_OUTPUT: {
-                __u32 *port_no = (__u32 *)&act.data ;
+                __u32 *port_no = (__u32 *)&a.data ;
                 ret = xdp_output(ctx, *port_no);
                 if (ret < 0)
                     action = XDP_ABORTED;
@@ -82,19 +108,19 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
                 goto out; // output should be the last action where included
             }
             case XDP_ACTION_ATTR_USERSPACE: {
-                void *xf_act = (void *) act.data;
-                if (xdp_userspace(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_userspace(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_SET: {
-                void *xf_act = (void *) act.data;
-                if (xdp_set(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_set(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_PUSH_VLAN: {
-                struct xdp_action_push_vlan *xf_act = (struct xdp_action_push_vlan *) act.data;
+                struct xdp_action_push_vlan *xf_act = (struct xdp_action_push_vlan *) a.data;
                 if (xdp_push_vlan(ctx, xf_act))
                     action = XDP_ABORTED;
                 break;
@@ -105,56 +131,56 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
             //     break;
             // }
             case XDP_ACTION_ATTR_SAMPLE: {
-                void *xf_act = (void *) act.data;
-                if (xdp_sample(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_sample(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_RECIRC: {
-                __u32 *recirc_id = (__u32 *) &act.data;
+                __u32 *recirc_id = (__u32 *) &a.data;
                 ret = xdp_recirc(ctx, *recirc_id);
                 if (ret < 0)
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_HASH: {
-                struct xdp_action_hash *xf_act = (struct xdp_action_hash *) &act.data;
+                struct xdp_action_hash *xf_act = (struct xdp_action_hash *) &a.data;
                 if (xdp_hash(ctx, xf_act))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_PUSH_MPLS: {
-                struct xdp_action_push_mpls *xf_act = (struct xdp_action_push_mpls *) &act.data;
+                struct xdp_action_push_mpls *xf_act = (struct xdp_action_push_mpls *) &a.data;
                 if (xdp_push_mpls(ctx, xf_act))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_POP_MPLS: {
-                __be16 *xf_act = (__be16 *) &act.data;
+                __be16 *xf_act = (__be16 *) &a.data;
                 if (xdp_pop_mpls(ctx, *xf_act))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_SET_MASKED: {
-                void *xf_act = (void *) act.data;
-                if (xdp_set_masked(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_set_masked(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_CT: {
-                void *xf_act = (void *) act.data;
-                if (xdp_ct(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_ct(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_TRUNC: {
-                struct xdp_action_trunc *xf_act = (struct xdp_action_trunc *) &act.data;
+                struct xdp_action_trunc *xf_act = (struct xdp_action_trunc *) &a.data;
                 if (xdp_trunc(ctx, xf_act))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_PUSH_ETH: {
-                struct xdp_action_push_eth *xf_act = (struct xdp_action_push_eth *) &act.data;
+                struct xdp_action_push_eth *xf_act = (struct xdp_action_push_eth *) &a.data;
                 if (xdp_push_eth(ctx, xf_act))
                     action = XDP_ABORTED;
                 break;
@@ -170,8 +196,8 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
                 break;
             }
             case XDP_ACTION_ATTR_PUSH_NSH: {
-                void *xf_act = (void *) act.data;
-                if (xdp_push_nsh(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_push_nsh(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
@@ -181,23 +207,23 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
                 break;
             }
             case XDP_ACTION_ATTR_METER: {
-                __u32 *meter_id = (__u32 *) &act.data;
+                __u32 *meter_id = (__u32 *) &a.data;
                 ret = xdp_meter(ctx, *meter_id);
                 if (ret < 0)
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_CLONE: {
-                void *xf_act = (void *) act.data;
-                if (xdp_clone(ctx, xf_act, act.hdr.len))
+                void *xf_act = (void *) a.data;
+                if (xdp_clone(ctx, xf_act, a.hdr.len))
                     action = XDP_ABORTED;
                 break;
             }
             case XDP_ACTION_ATTR_DROP: {
                 ret = xdp_drop(ctx);
+                action = XDP_DROP;
                 if (ret < 0)
                     action = XDP_ABORTED;
-                action = XDP_DROP;
                 break;
             }
             case __XDP_ACTION_ATTR_MAX:
@@ -212,12 +238,12 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
                 char msg[LOG_MSG_SIZE] = "Error occured whilst applying actions to packet";
                 logger(ctx, LOG_ERR, msg, LOG_MSG_SIZE);
             }
+            break;
         }
-
-    
+    } 
 
 out:
-    bpf_printk("xdp_inline_actions exiting\n");
+    bpf_printk("xdp_inline_actions exiting with action %d\n", action);
     return action;
 }
 

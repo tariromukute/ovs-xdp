@@ -6,7 +6,7 @@
 #include <getopt.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <linux/in.h>
+#include <netinet/in.h>
 #include <linux/in6.h>
 #include <linux/if_ether.h>
 #include <bpf/libbpf.h>
@@ -116,7 +116,7 @@ struct prog_command {
     }
 
 const char *get_enum_name(const struct enum_val *vals, unsigned int value);
-void print_flags(char *buf, size_t buf_len, const struct flag_val *flags,
+void print_flagsx(char *buf, size_t buf_len, const struct flag_val *flags,
          unsigned long flags_val);
 void print_addr(char *buf, size_t buf_len, const struct ip_addr *addr);
 void print_macaddr(char *buf, size_t buf_len, const struct mac_addr *addr);

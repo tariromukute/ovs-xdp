@@ -19,7 +19,7 @@
 #include "flow.h"
 #include "xf.h"
 #include "parsing_helpers.h"
-#include "parsing_xdp_key_helpers.h"
+#include "parsing_xf_key_helpers.h"
 
 #define SAMPLE_SIZE 64ul
 #define MAX_CPUS 128
@@ -49,14 +49,24 @@ struct micro_flow_map {
     __uint(key_size, sizeof(struct xf_key));
     __uint(value_size, sizeof(struct xfa_buf));
     __uint(max_entries, 100);
+    // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xf_micro_map SEC(".maps");
 
 /* map #1 */
+// struct macro_flow_map {
+//     __uint(type, BPF_MAP_TYPE_HASH);
+//     __type(key, struct xf_key);
+//     __type(value, struct xfa_buf);
+//     __uint(max_entries, 100);
+//     __uint(pinning, LIBBPF_PIN_BY_NAME);
+// } _xf_macro_map SEC(".maps");
+
 struct macro_flow_map {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct xf_key);
-    __type(value, struct xfa_buf);
+    __uint(key_size, sizeof(struct xf_key));
+    __uint(value_size, sizeof(struct xfa_buf));
     __uint(max_entries, 100);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } _xf_macro_map SEC(".maps");
 
 struct {
@@ -64,6 +74,7 @@ struct {
     __uint(key_size, sizeof(__u32));
     __uint(value_size, sizeof(struct xfa_buf));
     __uint(max_entries, 1);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } _xfa_buf_map SEC(".maps");
 
 /* map #2 */
@@ -72,6 +83,7 @@ struct {
     __uint(key_size, sizeof(__u32));
     __uint(value_size, sizeof(__u32));
     __uint(max_entries, XDP_ACTION_ATTR_MAX);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xf_tail_map SEC(".maps");
 
 /* NOTE: loading a xdp program for afxdp depends on the map being
@@ -81,7 +93,8 @@ struct {
     __uint(type, BPF_MAP_TYPE_XSKMAP);
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(int));
-    __uint(max_entries, 64);
+    __uint(max_entries, 128);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xsks_map SEC(".maps");
 
 /* map #4 */
@@ -90,6 +103,7 @@ struct {
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(__u32));
     __uint(max_entries, MAX_CPUS);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
 } _perf_map SEC(".maps");
 
 /* map #4 */
@@ -97,204 +111,207 @@ struct {
     __uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
     __uint(max_entries, 64);
     __uint(key_size, sizeof(__u32));
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
     __array(values, struct micro_flow_map);
 } _xf_ports_map SEC(".maps");
 
-// /* Header cursor to keep track of current parsing position */
-// struct hdr_cursor {
-//     void *pos;
-// };
+/* Note: High values of max_entries are resulting in program load error: 'Program too big' 
+ * Trying to pin the map so that it's shared is also resulting in load time error. So for
+ * now restricted to redirecting to fewer ifindex with values less than 64. */
+/* TODO: Checking on how we can increase the max_entries or support map sharing */
+struct {
+    __uint(type, BPF_MAP_TYPE_DEVMAP);
+    __uint(key_size, sizeof(int));
+    __uint(value_size, sizeof(int));
+    __uint(max_entries, 64);
+    // __uint(pinning, LIBBPF_PIN_BY_NAME);
+} tx_port SEC(".maps");
 
 static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, struct xf_key *key)
 {
-    // int nh_type;
-    // struct xdp_key_ethernet *eth;
-    // nh_type = parse_xdp_key_ethhdr(nh, data_end, &eth);
-    // if (nh_type < 0)
-    // {
-    //     goto out;
-    // }
-    // key->valid |= ETH_VALID;
+    int nh_type;
+    struct xf_key_ethernet *eth;
+    nh_type = parse_xf_key_ethhdr(nh, data_end, &eth);
+    if (nh_type < 0)
+    {
+        goto out;
+    }
+    key->valid |= ETH_VALID;
 
-    // memcpy(&key->eth, eth, sizeof(key->eth));
-    // if (nh_type == ETH_P_IP)
-    // {
-    //     struct xdp_key_ipv4 *iph;
-    //     nh_type = parse_xdp_key_iphdr(nh, data_end, &iph);
-    //     if (nh_type < 0)
-    //     {
-    //         goto out;
-    //     }
-    //     memcpy(&key->iph, iph, sizeof(struct xdp_key_ipv4));
-    //     key->valid |= IPV4_VALID;
+    memcpy(&key->eth, eth, sizeof(key->eth));
+    if (nh_type == ETH_P_IP)
+    {
+        struct xf_key_ipv4 *iph;
+        nh_type = parse_xf_key_iphdr(nh, data_end, &iph);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
+        memcpy(&key->iph, iph, sizeof(struct xf_key_ipv4));
+        key->valid |= IPV4_VALID;
 
-    //     /* Transport layer. */
-    //     if (nh_type == IPPROTO_TCP)
-    //     {
-    //         struct xdp_key_tcp *tcph;
-    //         nh_type = parse_xdp_key_tcphdr(nh, data_end, &tcph);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
+        /* Transport layer. */
+        if (nh_type == IPPROTO_TCP)
+        {
+            struct xf_key_tcp *tcph;
+            nh_type = parse_xf_key_tcphdr(nh, data_end, &tcph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
 
-    //         memcpy(&key->tcph, tcph, sizeof(struct xdp_key_tcp));
-    //         key->valid |= TCP_VALID;
+            memcpy(&key->tcph, tcph, sizeof(struct xf_key_tcp));
+            key->valid |= TCP_VALID;
 
-    //     }
-    //     else if (nh_type == IPPROTO_UDP)
-    //     {
-    //         struct xdp_key_udp *udph;
-    //         nh_type = parse_xdp_key_udphdr(nh, data_end, &udph);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
+        }
+        else if (nh_type == IPPROTO_UDP)
+        {
+            struct xf_key_udp *udph;
+            nh_type = parse_xf_key_udphdr(nh, data_end, &udph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
 
-    //         memcpy(&key->udph, udph, sizeof(struct xdp_key_udp));
-    //         key->valid |= UDP_VALID;
-    //     }
-    //     else if (nh_type == IPPROTO_SCTP)
-    //     {
-    //         /* TODO: implement code */
-    //         // key->valid |= MPLS_VALID;
-    //     }
-    //     else if (nh_type == IPPROTO_ICMP)
-    //     {
-    //         struct xdp_key_icmp *icmph;
-    //         nh_type = parse_xdp_key_icmphdr(nh, data_end, &icmph);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
-
-    //         memcpy(&key->icmph, icmph, sizeof(struct xdp_key_icmp));
-    //         key->valid |= ICMP_VALID;
-    //     }
-    // }
-    // else if (nh_type == ETH_P_ARP || nh_type == ETH_P_RARP)
-    // {
-    //     struct arp_ethhdr *arph;
-    //     nh_type = parse_arp_ethhdr(nh, data_end, &arph);
-    //     if (nh_type < 0)
-    //     {
-    //         goto out;
-    //     }
+            memcpy(&key->udph, udph, sizeof(struct xf_key_udp));
+            key->valid |= UDP_VALID;
+        }
+        else if (nh_type == IPPROTO_SCTP)
+        {
+            /* TODO: implement code */
+            // key->valid |= MPLS_VALID;
+        }
+        else if (nh_type == IPPROTO_ICMP)
+        {
+            struct xf_key_icmp *icmph;
+            nh_type = parse_xf_key_icmphdr(nh, data_end, &icmph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
+            memcpy(&key->icmph, icmph, sizeof(struct xf_key_icmp));
+            key->valid |= ICMP_VALID;
+        }
+    }
+    else if (nh_type == ETH_P_ARP || nh_type == ETH_P_RARP)
+    {
+        struct xf_key_arp *arph;
+        nh_type = parse_xf_key_arp(nh, data_end, &arph);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
         
-    //     // key->arph.ar_op = arph->ar_op;
-    //     key->arph.arp_sip = arph->ar_sip;
-    //     key->arph.arp_tip = arph->ar_tip;
-        
-    //     memcpy(key->arph.arp_sha, arph->ar_sha, sizeof(key->arph.arp_sha));
-    //     memcpy(key->arph.arp_tha, arph->ar_tha, sizeof(key->arph.arp_tha));
-    //     key->valid |= ARP_VALID;
-    // }
-    // else if (nh_type == ETH_P_MPLS_MC || nh_type == ETH_P_MPLS_UC)
-    // {
+        // memcpy(&key->arph, arph, sizeof(struct xf_key_arp));
 
-    //     /* TODO: implement code */
-    //     // key->valid |= MPLS_VALID;
-    // }
-    // else if (nh_type == ETH_P_IPV6)
-    // {
-    //     struct ipv6hdr *ip6h;
-    //     nh_type = parse_ip6hdr(nh, data_end, &ip6h);
-    //     if (nh_type < 0)
-    //     {
-    //         goto out;
-    //     }
+        key->valid |= ARP_VALID;
+    }
+    else if (nh_type == ETH_P_MPLS_MC || nh_type == ETH_P_MPLS_UC)
+    {
 
-    //     key->ipv6h.ipv6_proto = ip6h->nexthdr;
-    //     key->ipv6h.ipv6_tclass = ip6h->priority;
-    //     key->ipv6h.ipv6_hlimit = ip6h->hop_limit;
-    //     key->ipv6h.ipv6_frag = 0;
+        /* TODO: implement code */
+        // key->valid |= MPLS_VALID;
+    }
+    else if (nh_type == ETH_P_IPV6)
+    {
+        struct ipv6hdr *ip6h;
+        nh_type = parse_ip6hdr(nh, data_end, &ip6h);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
 
-    //     memcpy(&key->ipv6h.ipv6_src, ip6h->saddr.s6_addr32, sizeof(key->ipv6h.ipv6_src));
-    //     memcpy(&key->ipv6h.ipv6_dst, ip6h->daddr.s6_addr32, sizeof(key->ipv6h.ipv6_dst));
-    //     key->valid |= IPV6_VALID;
+        key->ipv6h.ipv6_proto = ip6h->nexthdr;
+        key->ipv6h.ipv6_tclass = ip6h->priority;
+        key->ipv6h.ipv6_hlimit = ip6h->hop_limit;
+        key->ipv6h.ipv6_frag = 0;
 
-    //     /* Transport layer. */
-    //     if (nh_type == IPPROTO_TCP)
-    //     {
-    //         struct xdp_key_tcp *tcph;
-    //         nh_type = parse_xdp_key_tcphdr(nh, data_end, &tcph);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
+        memcpy(&key->ipv6h.ipv6_src, ip6h->saddr.s6_addr32, sizeof(key->ipv6h.ipv6_src));
+        memcpy(&key->ipv6h.ipv6_dst, ip6h->daddr.s6_addr32, sizeof(key->ipv6h.ipv6_dst));
+        key->valid |= IPV6_VALID;
 
-    //         // memcpy(&key->tcph, tcph, sizeof(struct xdp_key_tcp)); // TODO: emiting this for now
-    //         // key->valid |= TCP_VALID;
-    //     }
-    //     else if (nh_type == IPPROTO_UDP)
-    //     {
-    //         struct xdp_key_udp *udph;
-    //         nh_type = parse_xdp_key_udphdr(nh, data_end, &udph);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
+        /* Transport layer. */
+        if (nh_type == IPPROTO_TCP)
+        {
+            struct xf_key_tcp *tcph;
+            nh_type = parse_xf_key_tcphdr(nh, data_end, &tcph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
 
-    //         // memcpy(&key->udph, udph, sizeof(struct xdp_key_udp)); // TODO: emiting this for now
-    //         // key->valid |= UDP_VALID;
-    //     }
-    //     else if (nh_type == IPPROTO_SCTP)
-    //     {
-    //         /* TODO: implement code */
-    //     }
-    //     else if (nh_type == IPPROTO_ICMPV6)
-    //     {
-    //         struct xdp_key_icmpv6 *icmp6h;
-    //         nh_type = parse_xdp_key_icmp6hdr(nh, data_end, &icmp6h);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
+            // memcpy(&key->tcph, tcph, sizeof(struct xf_key_tcp)); // TODO: emiting this for now
+            // key->valid |= TCP_VALID;
+        }
+        else if (nh_type == IPPROTO_UDP)
+        {
+            struct xf_key_udp *udph;
+            nh_type = parse_xf_key_udphdr(nh, data_end, &udph);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
 
-    //         memcpy(&key->icmp6h, icmp6h, sizeof(struct xdp_key_icmpv6));
-    //         key->valid |= ICMPV6_VALID;
-    //     }
-    // }
-    // else if (nh_type == ETH_P_NSH)
-    // {
-    //     struct xdp_key_nsh_base *nshh;
-    //     nh_type = parse_xdp_key_nsh_base(nh, data_end, &nshh);
-    //     if (nh_type < 0)
-    //     {
-    //         goto out;
-    //     }
+            // memcpy(&key->udph, udph, sizeof(struct xf_key_udp)); // TODO: emiting this for now
+            // key->valid |= UDP_VALID;
+        }
+        else if (nh_type == IPPROTO_SCTP)
+        {
+            /* TODO: implement code */
+        }
+        else if (nh_type == IPPROTO_ICMPV6)
+        {
+            struct xf_key_icmpv6 *icmp6h;
+            nh_type = parse_xf_key_icmp6hdr(nh, data_end, &icmp6h);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
 
-    //     memcpy(&key->nsh_base, nshh, sizeof(struct xdp_key_nsh_base));
-    //     key->valid |= NSH_BASE_VALID;
+            memcpy(&key->icmp6h, icmp6h, sizeof(struct xf_key_icmpv6));
+            key->valid |= ICMPV6_VALID;
+        }
+    }
+    else if (nh_type == ETH_P_NSH)
+    {
+        struct xf_key_nsh_base *nshh;
+        nh_type = parse_xf_key_nsh_base(nh, data_end, &nshh);
+        if (nh_type < 0)
+        {
+            goto out;
+        }
 
-    //     if (nshh->mdtype == NSH_M_TYPE1)
-    //     {
-    //         struct xdp_key_nsh_md1 *md1h;
-    //         nh_type = parse_xdp_key_nsh_md1(nh, data_end, &md1h);
-    //         if (nh_type < 0)
-    //         {
-    //             goto out;
-    //         }
+        memcpy(&key->nsh_base, nshh, sizeof(struct xf_key_nsh_base));
+        key->valid |= NSH_BASE_VALID;
 
-    //         memcpy(&key->nsh_md1, md1h, sizeof(struct xdp_key_nsh_md1));
-    //         key->valid |= NSH_MD1_VALID;
-    //     }
-    //     else if (nh_type != NSH_BASE_HDR_LEN && nshh->mdtype == NSH_M_TYPE1)
-    //     {
-    //         // struct xdp_key_nsh_md2 *md2h;
-    //         // nh_type = parse_xdp_key_nsh_md2(nh, data_end, &md2h);
-    //         // if (nh_type < 0)
-    //         // {
-    //         //     goto out;
-    //         // }
+        if (nshh->mdtype == NSH_M_TYPE1)
+        {
+            struct xf_key_nsh_md1 *md1h;
+            nh_type = parse_xf_key_nsh_md1(nh, data_end, &md1h);
+            if (nh_type < 0)
+            {
+                goto out;
+            }
 
-    //         // memcpy(&key->nsh_md2, md2h, sizeof(struct xdp_key_nsh_md2));
-    //         // key->valid |= NSH_MD2_VALID;
-    //     }
-    // }
+            memcpy(&key->nsh_md1, md1h, sizeof(struct xf_key_nsh_md1));
+            key->valid |= NSH_MD1_VALID;
+        }
+        else if (nh_type != NSH_BASE_HDR_LEN && nshh->mdtype == NSH_M_TYPE1)
+        {
+            // struct xf_key_nsh_md2 *md2h;
+            // nh_type = parse_xf_key_nsh_md2(nh, data_end, &md2h);
+            // if (nh_type < 0)
+            // {
+            //     goto out;
+            // }
+
+            // memcpy(&key->nsh_md2, md2h, sizeof(struct xf_key_nsh_md2));
+            // key->valid |= NSH_MD2_VALID;
+        }
+    }
     return 0;
-// out:
-//     return -1;
+out:
+    return -1;
 }
 
 __u8 log_level = 0b00001111;
@@ -503,8 +520,8 @@ static __always_inline int tail_action_prog__(struct xdp_md *ctx)
     if (!acts)
         return -1;
     /* These keep track of the next header type and iterator pointer */
-
-    int xfa_type = xfa_next(acts);
+    struct xfa_cur cursor = { 0 };
+    int xfa_type = xfa_next(acts, &cursor);
     if (xfa_type < 0)
         return -1;
 

@@ -87,9 +87,12 @@ typedef int (*libxdp_print_fn_t)(enum libxdp_print_level level,
 
 libxdp_print_fn_t libxdp_set_print(libxdp_print_fn_t fn);
 
+static char *path_to_dispatcher = ".";
 
 struct xdp_program;
 struct xdp_multiprog;
+
+void set_path_to_dispatcher(char *path);
 
 long libxdp_get_error(const void *ptr);
 int libxdp_strerror(int err, char *buf, size_t size);

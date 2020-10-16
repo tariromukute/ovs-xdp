@@ -27,6 +27,7 @@
 #include "libxdp.h"
 #include "prog_dispatcher.h"
 #include "err.h" /* ERR_PTR */
+#include "logging.h"
 
 #define XDP_RUN_CONFIG_SEC ".xdp_run_config"
 
@@ -77,48 +78,48 @@ static const char *xdp_action_names[] = {
     [XDP_REDIRECT] = "XDP_REDIRECT",
 };
 
-static int __base_pr(enum libxdp_print_level level, const char *format,
-             va_list args)
-{
-    if (level == LIBXDP_DEBUG)
-        return 0;
+// static int __base_pr(enum libxdp_print_level level, const char *format,
+//              va_list args)
+// {
+//     if (level == LIBXDP_DEBUG)
+//         return 0;
 
-    return vfprintf(stderr, format, args);
-}
+//     return vfprintf(stderr, format, args);
+// }
 
-static libxdp_print_fn_t __libxdp_pr = __base_pr;
+// static libxdp_print_fn_t __libxdp_pr = __base_pr;
 
-libxdp_print_fn_t libxdp_set_print(libxdp_print_fn_t fn)
-{
-    libxdp_print_fn_t old_print_fn = __libxdp_pr;
+// libxdp_print_fn_t libxdp_set_print(libxdp_print_fn_t fn)
+// {
+//     libxdp_print_fn_t old_print_fn = __libxdp_pr;
 
-    __libxdp_pr = fn;
-    return old_print_fn;
-}
+//     __libxdp_pr = fn;
+//     return old_print_fn;
+// }
 
-#define __printf(a, b) __attribute__((format(printf, a, b)))
+// #define __printf(a, b) __attribute__((format(printf, a, b)))
 
-__printf(2, 3) static void libxdp_print(enum libxdp_print_level level,
-                    const char *format, ...)
-{
-    va_list args;
+// __printf(2, 3) static void libxdp_print(enum libxdp_print_level level,
+//                     const char *format, ...)
+// {
+//     va_list args;
 
-    if (!__libxdp_pr)
-        return;
+//     if (!__libxdp_pr)
+//         return;
 
-    va_start(args, format);
-    __libxdp_pr(level, format, args);
-    va_end(args);
-}
+//     va_start(args, format);
+//     __libxdp_pr(level, format, args);
+//     va_end(args);
+// }
 
-#define __pr(level, fmt, ...)                                       \
-    do {                                                        \
-        libxdp_print(level, "libxdp: " fmt, ##__VA_ARGS__); \
-    } while (0)
+// #define __pr(level, fmt, ...)                                       \
+//     do {                                                        \
+//         libxdp_print(level, "libxdp: " fmt, ##__VA_ARGS__); \
+//     } while (0)
 
-#define pr_warn(fmt, ...) __pr(LIBXDP_WARN, fmt, ##__VA_ARGS__)
-#define pr_info(fmt, ...) __pr(LIBXDP_INFO, fmt, ##__VA_ARGS__)
-#define pr_debug(fmt, ...) __pr(LIBXDP_DEBUG, fmt, ##__VA_ARGS__)
+// #define pr_warn(fmt, ...) __pr(LIBXDP_WARN, fmt, ##__VA_ARGS__)
+// #define pr_info(fmt, ...) __pr(LIBXDP_INFO, fmt, ##__VA_ARGS__)
+// #define pr_debug(fmt, ...) __pr(LIBXDP_DEBUG, fmt, ##__VA_ARGS__)
 
 static int xdp_multiprog__attach(struct xdp_multiprog *old_mp,
                  struct xdp_multiprog *mp,
@@ -128,6 +129,11 @@ static struct xdp_multiprog *xdp_multiprog__generate(struct xdp_program **progs,
                              int ifindex);
 static int xdp_multiprog__pin(struct xdp_multiprog *mp);
 static int xdp_multiprog__unpin(struct xdp_multiprog *mp);
+
+void set_path_to_dispatcher(char *path)
+{
+    path_to_dispatcher = path;
+}
 
 long libxdp_get_error(const void *ptr)
 {
@@ -886,7 +892,7 @@ static int reuse_bpf_maps(struct bpf_object *dst_obj, const char *filename,
     struct bpf_object *src_obj;
     struct bpf_program *prog;
     struct bpf_map *map;
-    int err = 0, fd;
+    int err = 0, fd, pinned_fd;
 
     /* We can't load the XDP program before attaching it because it needs to
      * know about the dispatcher. As a workaround, open the file a second
@@ -913,11 +919,23 @@ static int reuse_bpf_maps(struct bpf_object *dst_obj, const char *filename,
 
         fd = bpf_object__find_map_fd_by_name(src_obj,
                              bpf_map__name(map));
+
+        pinned_fd = bpf_obj_get(bpf_map__get_pin_path(map));
+        
         if (fd < 0) {
             err = fd;
             goto out;
         }
 
+        /* Reuse the pinned fd instead, this should define a single fd for the same map
+         * We use this fd to reference the map in userspace (also as an id). So we should
+         * probably have the same fd for the same map */
+
+        
+        if (pinned_fd > 0) {
+            fd = pinned_fd;
+        }
+        
         err = bpf_map__reuse_fd(map, fd);
         if (err)
             goto out;
@@ -1236,7 +1254,8 @@ int xdp_program__attach_multi(struct xdp_program **progs, size_t num_progs,
 {
     struct xdp_multiprog *old_mp, *mp;
     int err = 0;
-
+    pr_info("info");
+    pr_warn("warn");
     if (!progs || !num_progs || flags)
         return -EINVAL;
 
@@ -1845,7 +1864,12 @@ static struct xdp_multiprog *xdp_multiprog__generate(struct xdp_program **progs,
     if (IS_ERR(mp))
         return mp;
 
-    dispatcher = xdp_program__find_file("xdp-dispatcher.o",
+    char dispatcher_path[PATH_MAX];
+    err = try_snprintf(dispatcher_path, PATH_MAX, "%s/%s", path_to_dispatcher, "xdp-dispatcher.o");
+    if (err)
+        goto err;
+
+    dispatcher = xdp_program__find_file(dispatcher_path,
                         "xdp/dispatcher", NULL);
     if (IS_ERR(dispatcher)) {
         err = PTR_ERR(dispatcher);

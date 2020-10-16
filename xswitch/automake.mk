@@ -272,6 +272,8 @@ xswitch_libxswitchuser_la_SOURCES = \
 	xswitch/datapath.h \
 	xswitch/flow-table.c \
 	xswitch/flow-table.h \
+	xswitch/xf_map.c \
+	xswitch/xf_map.h \
 	xswitch/flow.c \
 	xswitch/flow.h \
 	xswitch/loader.c \
@@ -315,6 +317,8 @@ XDP_TARGETS = \
 	xswitch/tail_prog \
 	xswitch/ep_inline_actions \
 	xswitch/ep_tail_actions \
+	xswitch/ep_pass_action \
+	xswitch/ep_router_actions \
 	xswitch/entry-point \
 	xswitch/xdp-dispatcher
 
@@ -363,12 +367,17 @@ dist_xswitch_DATA += \
 	xswitch/tail_prog.o \
 	xswitch/ep_inline_actions.o \
 	xswitch/ep_tail_actions.o \
-	xswitch/entry-point.o
+	xswitch/ep_pass_action.o \
+	xswitch/ep_router_actions.o \
+	xswitch/entry-point.o \
+	xswitch/xdp-dispatcher.o
 
 CLEANFILES += \
 	xswitch/tail_prog.ll \
 	xswitch/ep_inline_actions.ll \
 	xswitch/ep_tail_actions.ll \
+	xswitch/ep_pass_action.ll \
+	xswitch/ep_router_actions.ll \
 	xswitch/entry-point.ll \
 	xswitch/xdp-dispatcher.c \
 	xswitch/xdp-loader \

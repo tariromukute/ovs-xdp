@@ -296,7 +296,7 @@ static const struct opthandler {
              {handle_multistring}
 };
 
-void print_flags(char *buf, size_t buf_len, const struct flag_val *flags,
+void print_flagsx(char *buf, size_t buf_len, const struct flag_val *flags,
          unsigned long flags_set)
 {
     const struct flag_val *flag;
@@ -329,7 +329,7 @@ static void print_help_flags(const struct prog_option *opt)
     if (!opt->typearg)
         pr_warn("Missing typearg for opt %s\n", opt->name);
     else
-        print_flags(buf, sizeof(buf), opt->typearg, -1);
+        print_flagsx(buf, sizeof(buf), opt->typearg, -1);
 
     printf("  %s (valid values: %s)", opt->help, buf);
 }

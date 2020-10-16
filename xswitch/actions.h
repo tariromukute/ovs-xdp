@@ -19,6 +19,16 @@
 #define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
 #endif
 
+// static inline __u64 ether_addr_to_u64(const __u8 *addr)
+// {
+// 	__u64 u = 0;
+// 	int i;
+
+// 	for (i = ETH_ALEN; i >= 0; i--)
+// 		u = u << 8 | addr[i];
+// 	return u;
+// }
+
 static __always_inline int xdp_unspec(struct xdp_md *ctx)
 {
     int err = 0;
@@ -30,21 +40,150 @@ static __always_inline int xdp_unspec(struct xdp_md *ctx)
     return err;
 }
 
+#define IPV6_FLOWINFO_MASK bpf_htonl(0x0FFFFFFF)
+
+/* from include/net/ip.h */
+static __always_inline int ip_decrease_ttl(struct iphdr *iph)
+{
+    __u32 check = iph->check;
+    check += bpf_htons(0x0100);
+    iph->check = (__u16)(check + (check >= 0xFFFF));
+    return --iph->ttl;
+}
+
 static __always_inline int xdp_output(struct xdp_md *ctx, __u32 port_no)
 {
     int action = XDP_PASS;
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_output action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
+    struct bpf_fib_lookup fib_params = {};
+    struct ethhdr *eth = data;
+    struct ipv6hdr *ip6h;
+    struct iphdr *iph;
+    __u16 h_proto;
+    __u64 nh_off;
+    int rc;
+
+    nh_off = sizeof(*eth);
+    if (data + nh_off > data_end) {
+        action = XDP_DROP;
+        goto out;
+    }
+
+    h_proto = eth->h_proto;
+    if (h_proto == bpf_htons(ETH_P_IP)) {
+        iph = data + nh_off;
+
+        if (iph + 1 > data_end) {
+            action = XDP_DROP;
+            goto out;
+        }
+
+        if (iph->ttl <= 1)
+            goto out;
+
+        fib_params.family    = AF_INET;
+        fib_params.tos        = iph->tos;
+        fib_params.l4_protocol    = iph->protocol;
+        fib_params.sport    = 0;
+        fib_params.dport    = 0;
+        fib_params.tot_len    = bpf_ntohs(iph->tot_len);
+        fib_params.ipv4_src    = iph->saddr;
+        fib_params.ipv4_dst    = iph->daddr;
+    } else if (h_proto == bpf_htons(ETH_P_IPV6)) {
+        struct in6_addr *src = (struct in6_addr *) fib_params.ipv6_src;
+        struct in6_addr *dst = (struct in6_addr *) fib_params.ipv6_dst;
+
+        ip6h = data + nh_off;
+        if (ip6h + 1 > data_end) {
+            action = XDP_DROP;
+            goto out;
+        }
+
+        if (ip6h->hop_limit <= 1)
+            goto out;
+
+        fib_params.family    = AF_INET6;
+        fib_params.flowinfo    = *(__be32 *) ip6h & IPV6_FLOWINFO_MASK;
+        fib_params.l4_protocol    = ip6h->nexthdr;
+        fib_params.sport    = 0;
+        fib_params.dport    = 0;
+        fib_params.tot_len    = bpf_ntohs(ip6h->payload_len);
+        *src            = ip6h->saddr;
+        *dst            = ip6h->daddr;
+    }
+
+    fib_params.ifindex = ctx->ingress_ifindex;
+
+    rc = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
+    switch (rc) {
+    case BPF_FIB_LKUP_RET_SUCCESS:         /* lookup successful */
+        bpf_printk("BPF_FIB_LKUP_RET_SUCCESS\n");
+        if (h_proto == bpf_htons(ETH_P_IP)) {
+            // bound check to satisfy verifier
+            if (iph + 1 > data_end) {
+                action = XDP_DROP;
+                goto out;
+            }
+            ip_decrease_ttl(iph);
+        }
+        else if (h_proto == bpf_htons(ETH_P_IPV6)) {
+            // bound check to satisfy verifier
+            if (ip6h + 1 > data_end) {
+                action = XDP_DROP;
+                goto out;
+            }
+            ip6h->hop_limit--;
+        }
+        
+        __u8 h_dest[ETH_ALEN];
+        __u8 h_source[ETH_ALEN];
+        memcpy(h_dest, fib_params.dmac, ETH_ALEN);
+        memcpy(h_source, fib_params.smac, ETH_ALEN);
+        bpf_printk("eth->h_dest: %llu \n", ether_addr_to_u64(h_dest));
+        bpf_printk("eth->h_source: %llu \n", ether_addr_to_u64(h_source));
+
+        __u8 dmac[ETH_ALEN];
+        __u8 smac[ETH_ALEN];
+        memcpy(dmac, fib_params.dmac, ETH_ALEN);
+        memcpy(smac, fib_params.smac, ETH_ALEN);
+        bpf_printk("fib_params.dmac: %llx \n", u8_arr_to_u64(dmac, ETH_ALEN));
+        bpf_printk("fib_params.smac: %llx \n", u8_arr_to_u64(smac, ETH_ALEN));
+        bpf_printk("fib_params.ifindex: %d \n", fib_params.ifindex);
+
+        memcpy(eth->h_dest, fib_params.dmac, ETH_ALEN);
+        memcpy(eth->h_source, fib_params.smac, ETH_ALEN);
+        action = bpf_redirect_map(&tx_port, fib_params.ifindex, 0);
+        break;
+    case BPF_FIB_LKUP_RET_BLACKHOLE:    /* dest is blackholed; can be dropped */
+    case BPF_FIB_LKUP_RET_UNREACHABLE:  /* dest is unreachable; can be dropped */
+    case BPF_FIB_LKUP_RET_PROHIBIT:     /* dest not allowed; can be dropped */
+        bpf_printk("BPF_FIB_LKUP_RET_PROHIBIT\n");
+        action = XDP_DROP;
+        break;
+    case BPF_FIB_LKUP_RET_NOT_FWDED:    /* packet is not forwarded */
+    case BPF_FIB_LKUP_RET_FWD_DISABLED: /* fwding is not enabled on ingress */
+    case BPF_FIB_LKUP_RET_UNSUPP_LWT:   /* fwd requires encapsulation */
+    case BPF_FIB_LKUP_RET_NO_NEIGH:     /* no neighbor entry for nh */
+    case BPF_FIB_LKUP_RET_FRAG_NEEDED:  /* fragmentation required to fwd */
+        bpf_printk("BPF_FIB_LKUP_RET_FRAG_NEEDED\n");
+        /* PASS */
+        break;
+    }
+
+out:
     return action;
 }
 static __always_inline int xdp_userspace(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_userspace action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -55,7 +194,7 @@ static __always_inline int xdp_set(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_set action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -67,7 +206,7 @@ static __always_inline int xdp_push_vlan(struct xdp_md *ctx,
                     struct xdp_action_push_vlan *action)
 {
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_push_vlan action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -117,7 +256,7 @@ static __always_inline int xdp_push_vlan(struct xdp_md *ctx,
 static __always_inline int xdp_pop_vlan(struct xdp_md *ctx)
 {
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_vlan action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -169,7 +308,7 @@ static __always_inline int xdp_sample(struct xdp_md *ctx, void *action, __u32 si
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_sample action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -180,7 +319,7 @@ static __always_inline int xdp_recirc(struct xdp_md *ctx, __u32 action)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_recirc action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -192,7 +331,7 @@ static __always_inline int xdp_hash(struct xdp_md *ctx,
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_hash action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -204,7 +343,7 @@ static __always_inline int xdp_push_mpls(struct xdp_md *ctx,
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_push_mpls action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -215,7 +354,7 @@ static __always_inline int xdp_pop_mpls(struct xdp_md *ctx, __be16 action)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_mpls action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -226,7 +365,7 @@ static __always_inline int xdp_set_masked(struct xdp_md *ctx, void *action, __u3
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_set_masked action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -237,7 +376,7 @@ static __always_inline int xdp_ct(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_ct action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -249,7 +388,7 @@ static __always_inline int xdp_trunc(struct xdp_md *ctx,
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_trunc action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -261,7 +400,7 @@ static __always_inline int xdp_push_eth(struct xdp_md *ctx,
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_push_eth action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -272,7 +411,7 @@ static __always_inline int xdp_pop_eth(struct xdp_md *ctx)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_eth action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -283,7 +422,7 @@ static __always_inline int xdp_ct_clear(struct xdp_md *ctx)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_ct_clear action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -294,7 +433,7 @@ static __always_inline int xdp_push_nsh(struct xdp_md *ctx, void *action, __u32 
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_push_nsh action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -305,7 +444,7 @@ static __always_inline int xdp_pop_nsh(struct xdp_md *ctx)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_nsh action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -316,7 +455,7 @@ static __always_inline int xdp_meter(struct xdp_md *ctx, __u32 action)
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_meter action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -327,7 +466,7 @@ static __always_inline int xdp_clone(struct xdp_md *ctx, void *action, __u32 siz
 {
     int err = 0;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_clone action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -338,7 +477,7 @@ static __always_inline int xdp_drop(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_drop action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -348,19 +487,19 @@ static __always_inline int xdp_drop(struct xdp_md *ctx)
 static __always_inline int xdp_upcall(struct xdp_md *ctx,
                     struct xf_key *key)
 {
-    if (log_level & LOG_INFO) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_unspec action";
-        logger(ctx, LOG_INFO, msg, LOG_MSG_SIZE);
+    if (log_level & LOG_DEBUG) {
+        char msg[LOG_MSG_SIZE] = "Executing xdp_upcall action";
+        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
     /* NOTE: for debug only. In production uncomment */
     if (log_level & LOG_DEBUG) {
-        logger(ctx, LOG_EXTRACTED_KEY, key, sizeof(struct xf_key));
+        logger(ctx, LOG_XF_KEY, key, sizeof(struct xf_key));
     }
 
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
-    int index = ctx->rx_queue_index;
+    int index = ctx->ingress_ifindex;
 
     /* Add upcall information at the head of the packet */
     struct xf_upcall *up = data;
@@ -369,6 +508,7 @@ static __always_inline int xdp_upcall(struct xdp_md *ctx,
     upcall.type = XDP_PACKET_CMD_MISS;
     upcall.subtype = 0;
     upcall.ifindex = ctx->ingress_ifindex;
+    bpf_printk("ctx->ingress_ifindex: %d, upcall.ifindex: %d\n", ctx->ingress_ifindex, upcall.ifindex);
     upcall.pkt_len = data_end - data;
     __builtin_memcpy(&upcall.key, key, sizeof(*key));
 

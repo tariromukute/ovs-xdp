@@ -1,3 +1,6 @@
+#ifndef XDP_USER_HELPERS_H
+#define XDP_USER_HELPERS_H 1
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -10,6 +13,7 @@
 #include <openvswitch/dynamic-string.h>
 
 #include "flow.h"
+#include "xf.h"
 
 #ifndef HDR_LVL_MAX
 #define HDR_LVL_MAX 1096
@@ -28,7 +32,7 @@
 #endif
 
 void format_key_to_hex(struct ds *ds, struct xdp_flow_key *key);
-void xdp_flow_key_format(struct ds *ds, struct xdp_flow_key *key);
+void xdp_flow_key_format(struct ds *ds, struct xf_key *key);
 int format_xdp_actions(const struct xdp_flow_actions *acts);
 int format_xdp_key(struct xdp_flow_key *key, char buf[]);
 
@@ -239,9 +243,11 @@ void format_key_to_hex(struct ds *ds, struct xdp_flow_key *key)
 
 }
 
-void xdp_flow_key_format(struct ds *ds, struct xdp_flow_key *key)
+void xdp_flow_key_format(struct ds *ds, struct xf_key *key)
 {
 
+    ds_put_format(ds, "valid=(%d)", key->valid);
+    
     __u64 eth_src = u8_arr_to_u64(key->eth.eth_src, 6);
     __u64 eth_dst = u8_arr_to_u64(key->eth.eth_dst, 6);
     char src[100], dst[100];
@@ -634,3 +640,5 @@ int format_xdp_actions(const struct xdp_flow_actions *acts)
 
     return 0;
 }
+
+#endif /* XDP_USER_HELPERS_H */

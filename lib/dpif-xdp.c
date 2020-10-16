@@ -73,6 +73,7 @@
 #include "dirs.h"
 #include "datapath.h"
 #include "xdp_user_helpers.h"
+#include "xf.h"
 
 /* ================================================================
     The xdp uses more or less the same datapath as netdev, only
@@ -120,6 +121,8 @@ struct dp_xdp {
     struct ovs_refcount ref_cnt;
     atomic_flag destroyed;
 
+    // /* UMEM for AF_XDP */
+    // struct xsk_umem_info *umem;
     /* Ports.
      *
      * Any lookup into 'ports' or any access to the dp_netdev_ports found
@@ -213,6 +216,9 @@ struct dpif_xdp {
  */
 struct dp_xdp_entry_point {
     struct dp_xdp *dp;
+    /* for af_xdp */
+    struct xsk_umem_info *umem;
+
     int ep_id; 
     struct hmap ports; // list of port_no with this entry_point
     struct ovs_refcount ref_cnt;    /* Every reference must be refcount'ed. */
@@ -223,7 +229,7 @@ struct dp_xdp_entry_point {
     char *mode; /* Native, Generic, Offloaded */
 
     int prog_fd; /* The loaded xdp program */
-
+    
     int devmap_fd; /* map with destination interfaces for batch flushing */
 
     // struct ovs_mutex flow_mutex; /* TODO: check if mutex for flow_table_cache is needed and init it in relevant methods. */
@@ -238,10 +244,11 @@ struct dpif_xdp_port_state {
     char *name;
 };
 
-struct dpif_xdp_flow_dump {
+struct dpif_xf_dump {
     struct dpif_flow_dump up;
     struct cmap_position entry_point_pos;
-    struct xdp_flow_key flow_pos; /* TODO: define the type for a bpf_map position when looping */
+    // struct xf_key flow_pos; /* TODO: define the type for a bpf_map position when looping */
+    struct xf_key flow_pos; /* position in map when looping */
     struct dp_xdp_entry_point *cur_ep;
     int status;
     struct ovs_mutex mutex; /* TODO: *verify if needed */
@@ -258,9 +265,9 @@ struct dp_xdp_actions {
     struct nlattr actions[];    /* Sequence of OVS_ACTION_ATTR_* attributes. */
 };
 
-struct dpif_xdp_flow_dump_thread {
+struct dpif_xf_dump_thread {
     struct dpif_flow_dump_thread up;
-    struct dpif_xdp_flow_dump *dump;
+    struct dpif_xf_dump *dump;
 
     /* TODO: confirm if this is all we need */
 
@@ -271,7 +278,7 @@ struct dpif_xdp_flow_dump_thread {
 };
 
 struct ovs_xsk_event {
-    struct xdp_upcall header;
+    struct xf_upcall header;
     uint8_t data[];
 };
 
@@ -341,65 +348,65 @@ static void dp_xdp_handler_uninit(struct dp_handler *handler);
 static int create_dp_xdp(const char *name, const struct dpif_class *class,
                  struct dp_xdp **dpp)
     OVS_REQUIRES(dp_xdp_mutex);
-static int dpif_xdp_flow_key_from_nlattrs(const struct nlattr *key, uint32_t key_len,
-                              struct xdp_flow_key *xdp_key, bool probe);
+static int dpif_xf_key_from_nlattrs(const struct nlattr *key, uint32_t key_len,
+                              struct xf_key *xdp_key, bool probe);
 // static int dpif_xdp_mask_from_nlattrs(const struct nlattr *key, uint32_t key_len,
 //                               const struct nlattr *mask_key,
 //                               uint32_t mask_key_len, const struct flow *flow,
 //                               struct flow_wildcards *wc, bool probe);
-static void dp_xdp_flow_hash(const void *key, size_t key_len, ovs_u128 *hash);
+static void dp_xf_hash(const void *key, size_t key_len, ovs_u128 *hash);
 static void dp_xdp_ep_remove_flow(struct dp_xdp_entry_point *ep,
-                      struct xdp_flow *flow);
+                      struct xf *flow);
 static void dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep);
-static struct xdp_flow * dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
-                          struct xdp_flow_key *key,
+static struct xf * dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
+                          struct xf_key *key,
                           int *lookup_num_p);
-static struct xdp_flow * dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
+static struct xf * dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
                         const ovs_u128 *ufidp, const struct nlattr *key,
                         size_t key_len);
-// static struct xdp_flow * dp_xdp_ep_next_flow(const struct dp_xdp_entry_point *ep,
-//                         struct xdp_flow_key *key);
+// static struct xf * dp_xdp_ep_next_flow(const struct dp_xdp_entry_point *ep,
+//                         struct xf_key *key);
 static int dp_xdp_ep_update_flow(const struct dp_xdp_entry_point *ep,
-                        struct xdp_flow *flow);
-static struct dpif_xdp_flow_dump * dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump);
-static struct dpif_xdp_flow_dump_thread * dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread);
+                        struct xf *flow);
+static struct dpif_xf_dump * dpif_xf_dump_cast(struct dpif_flow_dump *dump);
+static struct dpif_xf_dump_thread * dpif_xf_dump_thread_cast(struct dpif_flow_dump_thread *thread);
 static int dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
-                        struct dp_xdp_port *port, const char *devname);
+                        struct dp_xdp_port *port, struct xs_cfg *cfg);
 static void dp_xdp_destroy_ep(struct dp_xdp_entry_point *ep);
 static bool dp_xdp_ep_try_ref(struct dp_xdp_entry_point *ep);
 static void dp_xdp_ep_unref(struct dp_xdp_entry_point *ep);
 static void dp_xdp_actions_free(struct dp_xdp_actions *actions);
 struct dp_xdp_actions * dp_xdp_actions_create(const struct nlattr *actions, size_t size);
-struct dp_xdp_actions * dp_xdp_flow_get_actions(const struct xdp_flow *flow);
+struct dp_xdp_actions * dp_xf_get_actions(const struct xf *flow);
 static struct dp_xdp_entry_point * dp_xdp_get_ep(struct dp_xdp *dp, int ep_id);
 static struct dp_xdp_entry_point * dp_xdp_ep_get_next(struct dp_xdp *dp, struct cmap_position *pos);
-static void dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp, int ep_id,
-                            const struct xdp_flow *xdp_flow,
+static void dp_xf_to_dpif_flow(const struct dp_xdp *dp, int ep_id,
+                            const struct xf *xf,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
                             struct dpif_flow *flow, bool terse);
-static void dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
-                            const struct xdp_flow *xdp_flow,
+static void dp_xf_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
+                            const struct xf *xf,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf, struct ofpbuf *act_buf,
                             struct dpif_flow *flow, bool terse);
-static void dpif_xdp_flow_get_stats(const struct xdp_flow *flow,
+static void dpif_xf_get_stats(const struct xf *flow,
                             struct dpif_flow_stats *stats);
 static int flow_put_on_ep(struct dp_xdp_entry_point *ep,
-                struct xdp_flow_key *key,
+                struct xf_key *key,
                 ovs_u128 *ufid,
                 const struct dpif_flow_put *put,
                 struct dpif_flow_stats *stats);
-static int dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put);
+static int dpif_xf_put(struct dpif *dpif, const struct dpif_flow_put *put);
 #pragma GCC diagnostic ignored "-Wunused-function"
 static int flow_del_on_ep(struct dp_xdp_entry_point *ep,
                 struct dpif_flow_stats *stats,
                 const struct dpif_flow_del *del);
-static int dpif_xdp_flow_del(struct dpif *dpif, const struct dpif_flow_del *del);
+static int dpif_xf_del(struct dpif *dpif, const struct dpif_flow_del *del);
 static int dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
     OVS_NO_THREAD_SAFETY_ANALYSIS;
-static int dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get);
+static int dpif_xf_get(const struct dpif *dpif, const struct dpif_flow_get *get);
 
-enum odp_key_fitness xdp_flow_key_to_flow(const struct xdp_flow_key *key, struct flow *flow);
-static int xdp_flow_actions_to_odp_actions(const struct xdp_flow_actions *xdp_acts,
+enum odp_key_fitness xf_key_to_flow(const struct xf_key *key, struct flow *flow);
+static int xf_actions_to_odp_actions(const struct xfa_buf *xdp_acts,
                 struct ofpbuf *out);
 
 static void xsk_free_umem_frame(struct xsk_socket_info *xsk, uint64_t frame)
@@ -709,12 +716,25 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
     hmap_insert(&dp->ports, &port->node, hash_port_no(port_no));
     seq_change(dp->port_seq);
 
+    char *path = xasprintf("%s/xswitch", ovs_pkgdatadir());
+    struct xs_cfg cfg = {
+        .path = path,
+        // .ifname = devname,
+        // .brname = dp->name,
+        .filenames = NULL,
+        .mode = XDP_MODE_UNSPEC,
+        .xsk_if_queue = 0
+    };
+    cfg.ifname = (char *)&cfg.ifname_buf;
+    strncpy(cfg.ifname, devname, IF_NAMESIZE);
+    cfg.brname = (char *)&cfg.brname_buf;
+    strncpy(cfg.brname, dp->name, IF_NAMESIZE);
     // configure ep
     /* NOTE: Seems like if we try to attached the xdp program to ovs-xdp the code will break.
      * Didn't investgate the cause just put an if statement that will stop the creation of an
      * entry point for ovs-xdp */
     if (strcmp(devname, "ovs-xdp") != 0) {
-        error = dp_xdp_configure_ep(&ep, dp, port, devname);
+        error = dp_xdp_configure_ep(&ep, dp, port, &cfg);
     } else {
         goto out;
     }
@@ -722,19 +742,18 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
         goto out;
     }
 
-    VLOG_INFO("--- func %s: waiting for key ---", __func__);
     // add socket for upcall
     fat_rwlock_wrlock(&dp->upcall_lock);
-    error = xsk_sock_create(&sock, devname);
+    error = xdp_xsk_create__v2(&sock, &cfg, ep->umem);
     fat_rwlock_unlock(&dp->upcall_lock);
-    VLOG_INFO("--- func %s: releasing key ---", __func__);
     if (error) {
         goto out;
     }
-    int fd = xsk_socket__fd(sock->xsk);
 
+    int fd = xsk_socket__fd(sock->xsk);
     port->upcall_pids[0] = fd;
 
+    VLOG_INFO("--- Called: %s xsk_socket__fd: %d ----", __func__, fd);
     error = port_add_channel(dp, port_no, sock);
 out:
     if (error) {
@@ -864,7 +883,8 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
     for (i = 0; i < dp->n_handlers; i++) {
         struct dp_handler *handler = &dp->handlers[i];
         fd = xsk_socket__fd(sock->xsk); // can be sock[i]->xsk
-        handler->fds[port_idx].fd =  fd > 0 ? fd : -1; 
+        VLOG_INFO("---- Called: %s xsk_socket__fd: %d port_idx: %d ----", __func__, fd, port_idx);
+        handler->fds[port_idx].fd =  fd >= 0 ? fd : -1; // fd = 0 is valid
         handler->fds[port_idx].events = POLLIN;
     }
 
@@ -972,6 +992,7 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
                 goto error;
             }
             upcall_pid = xsk_socket__fd(sock->xsk);
+            VLOG_INFO("---- Called: %s xsk_socket__fd :%d port.port_no: %d ----", __func__, upcall_pid, port.port_no);
         }
 
         /* Configure the vport to deliver misses to 'sock'. */
@@ -1098,7 +1119,7 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
                  struct dp_xdp **dpp)
     OVS_REQUIRES(dp_xdp_mutex)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s name %s ----", __func__, name);
     struct dp_xdp *dp;
     int error;
 
@@ -1123,6 +1144,12 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
                         ODPP_LOCAL);
 
     ovs_mutex_unlock(&dp->port_mutex);
+
+    /* Initialise UMEM */
+    // error = xswitch_xsk__create_umem__v2(&dp->umem);
+    // if (error) {
+    //     VLOG_INFO("---- Called: %s xswitch_xsk__create_umem__v2 failed");
+    // }
     
     /* Initialse channels */
     /* TODO: initialise n_channels */
@@ -1146,26 +1173,29 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
 }
 
 static int
-xdp_flow_actions_to_odp_actions(const struct xdp_flow_actions *xdp_acts, struct ofpbuf *out)
+xf_actions_to_odp_actions(const struct xfa_buf *xdp_acts, struct ofpbuf *out)
 {
-    int len = 0;
-    int acts_len = xdp_acts->len;
-    int hdr_len = 2; // length of headers for a xdp action
+    __u32 len = 0;
+    __u32 acts_len = xdp_acts->hdr.len;
+    __u32 hdr_len = XF_HDR_LEN; // length of headers for a xdp action
     __u8 *act_ptr = (__u8 *) xdp_acts->data;
    
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    ds_put_hex(&ds, xdp_acts, sizeof(struct xfa_buf));
     /* TODO: verify that the actions lengths defined in the xdp/flow.h is 
        the same as the odp length. Where there are not by design factor the
        difference else it's an error */
     while (len < acts_len) {
         act_ptr += len;
-        struct xdp_flow_action *act = (struct xdp_flow_action *)act_ptr;
-        switch (act->type) {
+        struct xf_act *act = (struct xf_act *)act_ptr;
+        // VLOG_INFO("--- Called: %s, action is: %u len: %u, act->hdr.len: %u, acts_len: %u", __func__, act->hdr.type, len, act->hdr.len, acts_len);
+        switch (act->hdr.type) {
         case XDP_ACTION_ATTR_UNSPEC:
             /* End of actions list. */
             return 0;
 
         case XDP_ACTION_ATTR_OUTPUT: {
-            if (act->len - hdr_len != sizeof(__u32)) {
+            if (act->hdr.len - hdr_len != sizeof(__u32)) {
                 return -EINVAL;
             }
             /* TODO: ifindex to odp translation */
@@ -1174,26 +1204,26 @@ xdp_flow_actions_to_odp_actions(const struct xdp_flow_actions *xdp_acts, struct 
         }
         case XDP_ACTION_ATTR_PUSH_VLAN: {
             nl_msg_put_unspec(out, OVS_ACTION_ATTR_PUSH_VLAN, act->data,
-                              act->len);
+                              act->hdr.len);
             break;
         }
         case XDP_ACTION_ATTR_RECIRC:
-            if (act->len - hdr_len != sizeof(__u32)) {
+            if (act->hdr.len - hdr_len != sizeof(__u32)) {
                 return -EINVAL;
             }
             nl_msg_put_u32(out, OVS_ACTION_ATTR_RECIRC, (uint32_t) *act->data);
             break;
         case XDP_ACTION_ATTR_TRUNC:
-            nl_msg_put_unspec(out, OVS_ACTION_ATTR_TRUNC, act->data, act->len);
+            nl_msg_put_unspec(out, OVS_ACTION_ATTR_TRUNC, act->data, act->hdr.len);
             break;
         case XDP_ACTION_ATTR_HASH:
-            nl_msg_put_unspec(out, OVS_ACTION_ATTR_HASH, act->data, act->len);
+            nl_msg_put_unspec(out, OVS_ACTION_ATTR_HASH, act->data, act->hdr.len);
             break;
         case XDP_ACTION_ATTR_PUSH_MPLS:
-            nl_msg_put_unspec(out, OVS_ACTION_ATTR_PUSH_MPLS, act->data, act->len);
+            nl_msg_put_unspec(out, OVS_ACTION_ATTR_PUSH_MPLS, act->data, act->hdr.len);
             break;
         case XDP_ACTION_ATTR_POP_MPLS:
-            if (act->len - hdr_len != sizeof(__be16)) {
+            if (act->hdr.len - hdr_len != sizeof(__be16)) {
                 return -EINVAL;
             }
             nl_msg_put_be16(out, OVS_ACTION_ATTR_POP_MPLS, (__be16) *act->data);
@@ -1247,13 +1277,13 @@ xdp_flow_actions_to_odp_actions(const struct xdp_flow_actions *xdp_acts, struct 
             OVS_NOT_REACHED();
             break;
         }
-        len += act->len;
+        len += act->hdr.len;
     }
     return 0;
 }
 
 enum odp_key_fitness
-xdp_flow_key_to_flow(const struct xdp_flow_key *key, struct flow *flow)
+xf_key_to_flow(const struct xf_key *key, struct flow *flow)
 {
     memset(flow, 0, sizeof *flow);
 
@@ -1316,330 +1346,143 @@ xdp_flow_key_to_flow(const struct xdp_flow_key *key, struct flow *flow)
 }
 
 static int
-dpif_xdp_flow_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_len,
-                              struct xdp_flow_actions *xdp_acts, bool probe)
+dpif_xf_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_len,
+                              struct xfa_buf *xdp_acts, bool probe)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
     /* TODO: indicate the key actions that can't be handled by xdp datapath  */
     const struct nlattr *a;
     size_t left;
     int len = 0;
-    int acts_len = 0;
-    int hdr_len = 2; // size of the xdp_flow_action header (type & len)
-    __u8 *ptr = xdp_acts->data;
     memset(xdp_acts, 0, sizeof *xdp_acts);
+    struct xfa_cur cursor;
+    memset(&cursor, 0, sizeof(struct xfa_cur));
+
     NL_ATTR_FOR_EACH(a, left, acts, actions_len) {
         enum ovs_action_attr type = nl_attr_type(a);
-        struct xdp_flow_action act;
-        memset(&act, 0, sizeof(struct xdp_flow_action));
+        __u32 hdr_type = 0;
+        void *data = NULL;
+
         switch (type) {
         case OVS_ACTION_ATTR_UNSPEC: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_UNSPEC;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
-            /* TODO: implement key parse */
+            hdr_type = XDP_ACTION_ATTR_UNSPEC;
             break;
         }
         case OVS_ACTION_ATTR_OUTPUT: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_OUTPUT;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len <= 0) {
-                // error
-            }
+            hdr_type = XDP_ACTION_ATTR_OUTPUT;
+
             int port = nl_attr_get_odp_port(a);
-            memcpy(act.data, &port, len);
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
-            /* TODO: implement key parse */
+            data = (void *)&port;
             break;
         }
         case OVS_ACTION_ATTR_TRUNC: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_TRUNC;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
-            /* TODO: implement key parse */
+            hdr_type = XDP_ACTION_ATTR_TRUNC;
             break;
         }
         case OVS_ACTION_ATTR_METER: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_METER;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
-            /* TODO: implement key parse */
+            hdr_type = XDP_ACTION_ATTR_METER;
             break;
         }
         case OVS_ACTION_ATTR_USERSPACE: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_USERSPACE;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
-            /* TODO: implement key parse */
+            hdr_type = XDP_ACTION_ATTR_USERSPACE;
+            // TODO: add the action data
             break;
         }
         case OVS_ACTION_ATTR_PUSH_VLAN: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_PUSH_VLAN;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
-            /* TODO: implement key parse */
+            hdr_type = XDP_ACTION_ATTR_PUSH_VLAN;
+            // TODO: add action data
             break;
         }
         case OVS_ACTION_ATTR_POP_VLAN: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_POP_VLAN;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_POP_VLAN;
             /* TODO: implement key parse */
             break;
         }
         case OVS_ACTION_ATTR_PUSH_MPLS: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_PUSH_MPLS;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_PUSH_MPLS;
             /* TODO: implement key parse */
             break;
         }
         case OVS_ACTION_ATTR_POP_MPLS: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_POP_MPLS;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_POP_MPLS;
             break;
         }
         case OVS_ACTION_ATTR_RECIRC: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_RECIRC;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_RECIRC;
             break;
         }
         case OVS_ACTION_ATTR_HASH: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_HASH;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_HASH;
             break;
         }
         case OVS_ACTION_ATTR_SET: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_SET;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_SET;
             break;
         }
         case OVS_ACTION_ATTR_SET_MASKED: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_SET_MASKED;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_SET_MASKED;
             break;
         }
         case OVS_ACTION_ATTR_SAMPLE: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_SAMPLE;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_SAMPLE;
             break;
         }
         case OVS_ACTION_ATTR_CT: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_CT;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_CT;
             break;
         }
         case OVS_ACTION_ATTR_CT_CLEAR: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_CT_CLEAR;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_CT_CLEAR;
             break;
         }
         case OVS_ACTION_ATTR_PUSH_ETH: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_PUSH_ETH;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_PUSH_ETH;
             break;
         }
         case OVS_ACTION_ATTR_POP_ETH: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_POP_ETH;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_POP_ETH;
             break;
         }
         case OVS_ACTION_ATTR_CLONE: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_CLONE;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_CLONE;
             break;
         }
         case OVS_ACTION_ATTR_PUSH_NSH: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_PUSH_NSH;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_PUSH_NSH;
             break;
         }
         case OVS_ACTION_ATTR_POP_NSH: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_POP_NSH;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_POP_NSH;
             break;
         }
         case OVS_ACTION_ATTR_CHECK_PKT_LEN: {
-            // len = nl_attr_get_size(a);
-            // act.type = XDP_ACTION_ATTR_CHECK_PKT_LEN;
-            // act.len = len <= 0 ? hdr_len : hdr_len + len;
-            // if (len > 0) {
-            //     // memcpy(act.data, data, len + hdr_len);
-            // }
-            // len += hdr_len;
-            // memcpy(ptr, &act, len);
-            // ptr += len;
-            acts_len += len;
+            
             break;
         }
         case OVS_ACTION_ATTR_DROP: {
             len = nl_attr_get_size(a);
-            act.type = XDP_ACTION_ATTR_DROP;
-            act.len = len <= 0 ? hdr_len : hdr_len + len;
-            if (len > 0) {
-                // memcpy(act.data, data, len + hdr_len);
-            }
-            len += hdr_len;
-            memcpy(ptr, &act, len);
-            ptr += len;
-            acts_len += len;
+            hdr_type = XDP_ACTION_ATTR_DROP;
             break;
         }
         case OVS_ACTION_ATTR_TUNNEL_PUSH:
@@ -1647,18 +1490,22 @@ dpif_xdp_flow_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_l
         case OVS_ACTION_ATTR_XDPNSH:
         case __OVS_ACTION_ATTR_MAX:
         default:
-            VLOG_INFO("---- Called: %s dpif_xdp_flow_actions_from_nlattrs type %d----", __func__, type);
+            VLOG_INFO("---- Called: %s dpif_xf_actions_from_nlattrs type %d----", __func__, type);
+            return ODP_FIT_ERROR;
+        }
+        int ret = xfa_put(xdp_acts, hdr_type, &cursor, data, len);
+        if (ret < 0) {
             return ODP_FIT_ERROR;
         }
     }
-    xdp_acts->len = acts_len;
+    // xdp_acts->cursor.len = acts_len;
     return ODP_FIT_PERFECT;
 }
 
 
 static int
-dpif_xdp_flow_key_from_nlattrs(const struct nlattr *key, uint32_t key_len,
-                              struct xdp_flow_key *xdp_key, bool probe)
+dpif_xf_key_from_nlattrs(const struct nlattr *key, uint32_t key_len,
+                              struct xf_key *xdp_key, bool probe)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
     /* TODO: indicate the key actions that can't be handled by xdp datapath  */
@@ -1847,7 +1694,6 @@ dpif_xdp_flow_key_from_nlattrs(const struct nlattr *key, uint32_t key_len,
         default:
             return ODP_FIT_ERROR;
         }
-        VLOG_INFO("---- Called: %s, switch %d ----", __func__, type);
     }
     return ODP_FIT_PERFECT;
 }
@@ -1867,7 +1713,7 @@ dpif_xdp_flow_key_from_nlattrs(const struct nlattr *key, uint32_t key_len,
 
 static void
 dp_xdp_ep_remove_flow(struct dp_xdp_entry_point *ep,
-                      struct xdp_flow *flow)
+                      struct xf *flow)
     // OVS_REQUIRES(ep->flow_mutex) /* TODO: check if needed. Comment in dp_xdp_entry_point too */
 {
     /* TODO: remove flow from the ep->flow_table_cache bpf_map */
@@ -1877,37 +1723,38 @@ static void
 dp_xdp_ep_flow_flush(struct dp_xdp_entry_point *ep)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    // struct xdp_flow *xdp_flow;
+    // struct xf *xf;
 
     // ovs_mutex_lock(&ep->flow_mutex); /* TODO: uncomment if needed */
     
     /* TODO: loop through the ep->flow_table_cache bpf_map passing each flow and ep to
-       dp_xdp_ep_remove_flow(ep, xdp_flow) */
+       dp_xdp_ep_remove_flow(ep, xf) */
 
     // ovs_mutex_unlock(&ep->flow_mutex); /* TODO: uncomment if needed */
 }
 
-static struct xdp_flow *
+static struct xf *
 dp_xdp_ep_lookup_flow(struct dp_xdp_entry_point *ep,
-                          struct xdp_flow_key *key,
+                          struct xf_key *key,
                           int *lookup_num_p)
 {
     // VLOG_INFO("---- Called: %s ep->flow_map_fd: %d ----", __func__, ep->flow_map_fd);
-    struct xdp_flow *xdp_flow = NULL;
+    struct xf *xf = NULL;
 
     /* TODO: implement method */
-
-    xdp_ep_flow_lookup(ep->flow_map_fd, key, &xdp_flow);
-    return xdp_flow;
+    struct dp_xdp *dp = ep->dp;
+    // xswitch_ep_flow_lookup(ep->flow_map_fd, key, &xf);
+    xswitch_br__flow_lookup(dp->name, key, &xf);
+    return xf;
 }
 
-static struct xdp_flow *
+static struct xf *
 dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
                         const ovs_u128 *ufidp, const struct nlattr *key,
                         size_t key_len)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    // struct xdp_flow *xdp_flow;
+    // struct xf *xf;
     // struct flow flow;
     // ovs_u128 ufid;
 
@@ -1917,48 +1764,55 @@ dp_xdp_ep_find_flow(const struct dp_xdp_entry_point *ep,
     /* TODO: check if ufid is set, if not set generate one using the
        a hash function on the flows and set the result to ufid */
 
-    /* TODO: search for the flow in the ep's bpf_map and return xdp_flow
+    /* TODO: search for the flow in the ep's bpf_map and return xf
        if found. ELSE return NULL */
 
     return NULL;
 }
 
-// static struct xdp_flow * dp_xdp_ep_next_flow(const struct dp_xdp_entry_point *ep,
-//                         struct xdp_flow_key *key)
+// static struct xf * dp_xdp_ep_next_flow(const struct dp_xdp_entry_point *ep,
+//                         struct xf_key *key)
 // {
 //     VLOG_INFO("---- Called: %s flow_map_fd %d ----", __func__, ep->flow_map_fd);
-//     struct xdp_flow *xdp_flow = NULL;
+//     struct xf *xf = NULL;
     
-//     /* returns xdp_flow = NULL when end of map */
-//     if (xdp_ep_flow_next(ep->flow_map_fd, key, &xdp_flow)) {
-//         xdp_flow = NULL;
+//     /* returns xf = NULL when end of map */
+//     if (xswitch_ep_flow_next(ep->flow_map_fd, key, &xf)) {
+//         xf = NULL;
 //     }
 
-//     return xdp_flow;
+//     return xf;
 // }
 
 static int dp_xdp_ep_update_flow(const struct dp_xdp_entry_point *ep,
-                        struct xdp_flow *flow)
+                        struct xf *flow)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
     int error = 0;
 
-    error = xdp_ep_flow_insert(ep->flow_map_fd, flow);
+    struct dp_xdp *dp = ep->dp;
+    // error = xswitch_ep_flow_insert(ep->flow_map_fd, flow);
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    xdp_flow_key_format(&ds, &flow->key);
+    VLOG_INFO("---- Called: %s flow key %s ------", __func__, ds_cstr(&ds));
+    ds_destroy(&ds);
+
+    error = xswitch_br__flow_insert(dp->name, flow);
     return error;   
 }
 
-static struct dpif_xdp_flow_dump *
-dpif_xdp_flow_dump_cast(struct dpif_flow_dump *dump)
+static struct dpif_xf_dump *
+dpif_xf_dump_cast(struct dpif_flow_dump *dump)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    return CONTAINER_OF(dump, struct dpif_xdp_flow_dump, up);
+    return CONTAINER_OF(dump, struct dpif_xf_dump, up);
 }
 
-static struct dpif_xdp_flow_dump_thread *
-dpif_xdp_flow_dump_thread_cast(struct dpif_flow_dump_thread *thread)
+static struct dpif_xf_dump_thread *
+dpif_xf_dump_thread_cast(struct dpif_flow_dump_thread *thread)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    return CONTAINER_OF(thread, struct dpif_xdp_flow_dump_thread, up);
+    return CONTAINER_OF(thread, struct dpif_xf_dump_thread, up);
 }
 
 /* Given cmap position 'pos', tries to ref the next node.  If try_ref()
@@ -1984,21 +1838,28 @@ dp_xdp_ep_get_next(struct dp_xdp *dp, struct cmap_position *pos)
 /* Configures the 'ep' based on the input argument. */
 static int
 dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
-                        struct dp_xdp_port *port, const char *devname)
+                        struct dp_xdp_port *port, struct xs_cfg *cfg)
 {
-    VLOG_INFO("---- Called: %s, devname %s ----", __func__, devname);
+    VLOG_INFO("---- Called: %s, devname %s ----", __func__, cfg->ifname);
     struct xdp_ep *xdp_ep;
     int error = 0;
-    struct dp_xdp_entry_point *ep;
+    struct dp_xdp_entry_point *ep = NULL;
     *epp = NULL;
-    char *path = xasprintf("%s/xdp", ovs_pkgdatadir());
+    
+    // check if program already loaded
+    if (dp_xdp_get_ep(dp, port->ep_id))
+        goto out;
+
     /* load the xdp program */
     xdp_ep = xzalloc(sizeof *xdp_ep);
-    error = xdp_load(xdp_ep, path, devname);
-    if (error) {
+    // error = xdp_load(xdp_ep, path, devname);
+    error = xdp_prog_default_load(xdp_ep, cfg);
+
+    /* If program exist probably want to unload and load again */
+    if (!(error == EEXIST || error == -EEXIST || error == 0)) {
         goto out;
     }
-    VLOG_INFO("--- Successfully loaded xdp program ---");
+    VLOG_INFO("--- Successfully loaded xdp program ep_id: %d ---", xdp_ep->ep_id);
     /* check if port has been configure on an already existing ep */
     ep = dp_xdp_get_ep(dp, xdp_ep->ep_id);
     if (!ep) {
@@ -2011,12 +1872,21 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
         hmap_init(&ep->ports);
         cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
                     hash_int(xdp_ep->ep_id, 0));
+         /* Initialise UMEM */
+        error = xswitch_xsk__create_umem__v2(&ep->umem);
+        if (error) {
+            VLOG_INFO("---- Called: %s xswitch_xsk__create_umem__v2 failed");
+            goto out;
+        }
     }
 
     hmap_insert(&ep->ports, &port->epnode, hash_port_no(port->port_no));
     port->ep_id = xdp_ep->ep_id;
     *epp = ep;
     
+    if (dp_xdp_get_ep(dp, xdp_ep->ep_id))
+        error = 0;
+
 out:
     if (error) {
         dp_xdp_destroy_ep(ep);
@@ -2089,7 +1959,7 @@ dp_xdp_actions_create(const struct nlattr *actions, size_t size)
 }
 
 struct dp_xdp_actions *
-dp_xdp_flow_get_actions(const struct xdp_flow *flow)
+dp_xf_get_actions(const struct xf *flow)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
     // return ovsrcu_get(struct dp_xdp_actions *, &flow->actions);
@@ -2118,12 +1988,12 @@ dp_xdp_get_ep(struct dp_xdp *dp, int ep_id)
 }
 
 static void
-dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp, int ep_id,
-                            const struct xdp_flow *xdp_flow,
+dp_xf_to_dpif_flow(const struct dp_xdp *dp, int ep_id,
+                            const struct xf *xf,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf,
                             struct dpif_flow *flow, bool terse)
 {
-    // VLOG_INFO("---- Called: %s 0 ----", __func__);
+    VLOG_INFO("---- Called: %s ----", __func__);
 
     /* TODO: implement this method */
 
@@ -2132,15 +2002,15 @@ dp_xdp_flow_to_dpif_flow(const struct dp_xdp *dp, int ep_id,
        flow on different entry points. */
 
     struct ofpbuf act_buf;
-    dp_xdp_flow_to_dpif_flow__(dp, ep_id, xdp_flow, key_buf, mask_buf, &act_buf, flow, terse);
+    dp_xf_to_dpif_flow__(dp, ep_id, xf, key_buf, mask_buf, &act_buf, flow, terse);
 }
 
 /* NOTE: when a single flow is being requested by flow_get the buffer provided maybe small for key, mask
  * and actions to fit in. Therefore we will pass the actions to the point thats not in the buffer as other
  * dpif hence this overloaded function */
 static void
-dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
-                            const struct xdp_flow *xdp_flow,
+dp_xf_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
+                            const struct xf *xf,
                             struct ofpbuf *key_buf, struct ofpbuf *mask_buf, struct ofpbuf *act_buf,
                             struct dpif_flow *dpif_flow, bool terse)
 {
@@ -2154,7 +2024,7 @@ dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
     struct flow flow;
     
 
-    xdp_flow_key_to_flow(&xdp_flow->key, &flow);
+    xf_key_to_flow(&xf->key, &flow);
 
     if (terse) {
         memset(dpif_flow, 0, sizeof *dpif_flow);
@@ -2177,14 +2047,14 @@ dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
         /* Actions */
         offset = act_buf->size;
         dpif_flow->actions = ofpbuf_tail(act_buf);
-        int error = xdp_flow_actions_to_odp_actions(&xdp_flow->actions, act_buf);
+        int error = xf_actions_to_odp_actions(&xf->actions, act_buf);
         if (error) {
-            VLOG_WARN("---- Called: %s, one of the xdp_flow_actions to odp_actions failed ----", __func__);
+            VLOG_WARN("---- Called: %s, one of the xfa_buf to odp_actions failed ----", __func__);
         }
         dpif_flow->actions_len = key_buf->size - offset;
     }
 
-    dp_xdp_flow_hash(dpif_flow->key, dpif_flow->key_len, &dpif_flow->ufid);
+    dp_xf_hash(dpif_flow->key, dpif_flow->key_len, &dpif_flow->ufid);
     dpif_flow->ufid_present = true;
     // dpif_flow->pmd_id = netdev_flow->pmd_id; /* TODO: assign ep_id */
 
@@ -2192,7 +2062,7 @@ dp_xdp_flow_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
 }
 
 static void
-dpif_xdp_flow_get_stats(const struct xdp_flow *flow,
+dpif_xf_get_stats(const struct xf *flow,
                             struct dpif_flow_stats *stats)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
@@ -2201,19 +2071,19 @@ dpif_xdp_flow_get_stats(const struct xdp_flow *flow,
 
 static int
 flow_put_on_ep(struct dp_xdp_entry_point *ep,
-                struct xdp_flow_key *key,
+                struct xf_key *key,
                 ovs_u128 *ufid,
                 const struct dpif_flow_put *put,
                 struct dpif_flow_stats *stats)
 {
-    struct xdp_flow *xdp_flow = NULL;
-    struct xdp_flow_actions acts;
+    struct xf *xf = NULL;
+    struct xfa_buf acts;
     int error = 0;
 
-    error = dpif_xdp_flow_actions_from_nlattrs(put->actions, put->actions_len, &acts,
+    error = dpif_xf_actions_from_nlattrs(put->actions, put->actions_len, &acts,
                                         true);
     if (error) {
-        VLOG_INFO("---- Called: %s, error from dpif_xdp_flow_actions_from_nlattrs ----", __func__);
+        VLOG_INFO("---- Called: %s, error from dpif_xf_actions_from_nlattrs ----", __func__);
         goto out;
     }
 
@@ -2222,13 +2092,13 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
     }
 
     // ovs_mutex_lock(&ep->flow_mutex); // TODO: check if needed
-    xdp_flow = dp_xdp_ep_lookup_flow(ep, key, 0);
-    if (!xdp_flow) {
+    xf = dp_xdp_ep_lookup_flow(ep, key, 0);
+    if (!xf) {
         if (put->flags & DPIF_FP_CREATE) {
-            struct xdp_flow flow;
-            memset(&flow, 0, sizeof(struct xdp_flow));
-            memcpy(&flow.key, key, sizeof(struct xdp_flow_key));
-            memcpy(&flow.actions, &acts, sizeof(struct xdp_flow_actions));
+            struct xf flow;
+            memset(&flow, 0, sizeof(struct xf));
+            memcpy(&flow.key, key, sizeof(struct xf_key));
+            memcpy(&flow.actions, &acts, sizeof(struct xfa_buf));
             error = dp_xdp_ep_update_flow(ep, &flow);
             if (error) {
                 goto out;
@@ -2247,13 +2117,13 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
             new_actions = dp_xdp_actions_create(put->actions,
                                                    put->actions_len);
 
-            old_actions = dp_xdp_flow_get_actions(xdp_flow);
-            // ovsrcu_set(&xdp_flow->actions, new_actions);
+            old_actions = dp_xf_get_actions(xf);
+            // ovsrcu_set(&xf->actions, new_actions);
 
             /* TODO: update the bpf_map flow action */
 
             if (stats) {
-                dpif_xdp_flow_get_stats(xdp_flow, stats);
+                dpif_xf_get_stats(xf, stats);
             }
 
             /* TODO: verify if this is the case as well for our implementation 
@@ -2288,11 +2158,11 @@ out:
 }
 
 static int
-dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
+dpif_xf_put(struct dpif *dpif, const struct dpif_flow_put *put)
 {
-    VLOG_INFO("---- Called: %s pmd_id %d ----", __func__, put->pmd_id);
+    // VLOG_INFO("---- Called: %s pmd_id %d ----", __func__, put->pmd_id);
     struct dp_xdp *dp = get_dp_xdp(dpif);
-    struct xdp_flow_key key; //, mask;
+    struct xf_key key; //, mask;
     struct dp_xdp_entry_point *ep;
     ovs_u128 ufid;
     int error = 0;
@@ -2302,26 +2172,10 @@ dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
         memset(put->stats, 0, sizeof *put->stats);
     }
     /* TODO: implement method */
-    error = dpif_xdp_flow_key_from_nlattrs(put->key, put->key_len, &key,
+    error = dpif_xf_key_from_nlattrs(put->key, put->key_len, &key,
                                         probe);
 
-    struct ds ds = DS_EMPTY_INITIALIZER;
-    ds_put_hex(&ds, &key, sizeof(struct xdp_flow_key));
-    VLOG_INFO("xdp_key_put %s \n", ds_cstr(&ds));
-    ds_destroy(&ds);
-
-    struct ds dsx = DS_EMPTY_INITIALIZER;
-    format_key_to_hex(&dsx, &key);
-    VLOG_INFO("put_format_key_to_hex %s \n", ds_cstr(&dsx));
-    ds_destroy(&dsx);
-
-    struct ds dsk = DS_EMPTY_INITIALIZER;
-    xdp_flow_key_format(&dsk, &key);
-    VLOG_INFO("xdp_put_format_key_to_hex %s \n", ds_cstr(&dsk));
-    ds_destroy(&dsk);
-
     if (error) {
-        VLOG_INFO("---- Called: %s, failed dpif_xdp_flow_key_from_nlattrs ----", __func__);
         return error;
     }
 
@@ -2349,7 +2203,6 @@ dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
             ep_error = flow_put_on_ep(ep, &key, &ufid, put,
                                         &ep_stats);
             if (ep_error) {
-                VLOG_INFO("---- Called: %s, error putting flow CMAP_FOR_EACH ----", __func__);
                 error = ep_error;
             } else if (put->stats) {
                 put->stats->n_packets += ep_stats.n_packets;
@@ -2363,9 +2216,7 @@ dpif_xdp_flow_put(struct dpif *dpif, const struct dpif_flow_put *put)
         if (!ep) {
             return EINVAL;
         }
-        VLOG_INFO("--- Processin: %s pmd_id %d ---", __func__, put->pmd_id);
         error = flow_put_on_ep(ep, &key, &ufid, put, put->stats);
-        VLOG_INFO("---- Called: %s, error putting flow CMAP_FOR_EACH ----", __func__);
         dp_xdp_ep_unref(ep);
     }
     return error;
@@ -2377,18 +2228,18 @@ flow_del_on_ep(struct dp_xdp_entry_point *ep,
                 const struct dpif_flow_del *del)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
-    struct xdp_flow *xdp_flow;
+    struct xf *xf;
     int error = 0;
 
     // ovs_mutex_lock(&ep->flow_mutex); // TODO: check if needed
-    xdp_flow = dp_xdp_ep_find_flow(ep, del->ufid, del->key,
+    xf = dp_xdp_ep_find_flow(ep, del->ufid, del->key,
                                           del->key_len);
-    if (xdp_flow) {
-        // VLOG_INFO("== Called: %s, xdp_flow not null ==", __func__);
+    if (xf) {
+        // VLOG_INFO("== Called: %s, xf not null ==", __func__);
         if (stats) {
-            dpif_xdp_flow_get_stats(xdp_flow, stats);
+            dpif_xf_get_stats(xf, stats);
         }
-        dp_xdp_ep_remove_flow(ep, xdp_flow);
+        dp_xdp_ep_remove_flow(ep, xf);
     } else {
         error = ENOENT;
     }
@@ -2398,7 +2249,7 @@ flow_del_on_ep(struct dp_xdp_entry_point *ep,
 }
 
 static int
-dpif_xdp_flow_del(struct dpif *dpif, const struct dpif_flow_del *del)
+dpif_xf_del(struct dpif *dpif, const struct dpif_flow_del *del)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
     int error = 0;
@@ -2448,14 +2299,16 @@ static void complete_tx(struct xsk_socket_info *xsk)
     if (!xsk->outstanding_tx)
         return;
 
-    sendto(xsk_socket__fd(xsk->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
-
+    VLOG_INFO("--- Called: %s xsk_socket__fd(xsk->xsk): %d ----", __func__, xsk_socket__fd(xsk->xsk));
+    int ret = sendto(xsk_socket__fd(xsk->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
+    VLOG_INFO("--- Called: %s sendto return: %d ---", __func__, ret);
 
     /* Collect/free completed TX buffers */
     completed = xsk_ring_cons__peek(&xsk->umem->cq,
                     XSK_RING_CONS__DEFAULT_NUM_DESCS,
                     &idx_cq);
 
+    VLOG_INFO("--- Called: %s completed: %d ---", __func__, completed);
     if (completed > 0) {
         for (int i = 0; i < completed; i++)
             xsk_free_umem_frame(xsk,
@@ -2468,26 +2321,27 @@ static void complete_tx(struct xsk_socket_info *xsk)
 
 static void tx_only(struct xsk_socket_info *xsk, struct dp_packet *packet)
 {
+    VLOG_INFO("---- Called: %s ----", __func__);
     __u32 idx = 0;
     
 
     if (xsk_ring_prod__reserve(&xsk->tx, 1, &idx) == 1) {
-            
-            // get address of free mem
-            uint64_t addr = xsk_alloc_umem_frame(xsk);
-            void *ptr = xsk_umem__get_data(xsk->umem->buffer, addr);
-            uint32_t len = dp_packet_size(packet);
-            // fill that address with packets (memcpy)
-            memcpy(ptr, dp_packet_data(packet), len);
-            
-            // assign that addr to ring
-            xsk_ring_prod__tx_desc(&xsk->tx, idx)->addr    = addr;
-            xsk_ring_prod__tx_desc(&xsk->tx, idx)->len = len;
+        VLOG_INFO("---- Called: %s xsk_ring_prod__reserve ---", __func__); 
+        // get address of free mem
+        uint64_t addr = xsk_alloc_umem_frame(xsk);
+        void *ptr = xsk_umem__get_data(xsk->umem->buffer, addr);
+        uint32_t len = dp_packet_size(packet);
+        // fill that address with packets (memcpy)
+        memcpy(ptr, dp_packet_data(packet), len);
+        
+        // assign that addr to ring
+        xsk_ring_prod__tx_desc(&xsk->tx, idx)->addr    = addr;
+        xsk_ring_prod__tx_desc(&xsk->tx, idx)->len = len;
 
-            xsk_ring_prod__submit(&xsk->tx, 1);
-            xsk->outstanding_tx++;
-            xsk->stats.tx_bytes += len;
-            xsk->stats.tx_packets++;
+        xsk_ring_prod__submit(&xsk->tx, 1);
+        xsk->outstanding_tx++;
+        xsk->stats.tx_bytes += len;
+        xsk->stats.tx_packets++;
     }
 
     // send it out.
@@ -2501,7 +2355,7 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
     // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct dp_xdp_port *port;
-    // int queue = 0;
+    int queue = 0;
     // struct dp_xdp_entry_point *ep;
     int error = 0;
 
@@ -2533,9 +2387,15 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
         enum ovs_action_attr type = nl_attr_type(a);
 
         if (type == OVS_ACTION_ATTR_OUTPUT) {
-            odp_port_t port_no = nl_attr_get_odp_port(a);
+            odp_port_t port_no = { 0 };
+            if (bpf_ntohs(execute->flow->dl_type) == ETH_P_ARP 
+                || bpf_ntohs(execute->flow->dl_type) == ETH_P_RARP) {
+                    VLOG_INFO("---- Called: %s ARP ----", __func__);
+                    port_no = nl_attr_get_odp_port(a);
+            } else {
+                port_no = execute->flow->in_port.odp_port;
+            }
 
-            //  odp_port_t port_no = execute->flow->in_port.odp_port;
             ovs_mutex_lock(&dp->port_mutex);
             error = get_port_by_number(dp, port_no, &port);
             ovs_mutex_unlock(&dp->port_mutex);
@@ -2546,9 +2406,11 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
             struct dp_packet_batch batch;
             struct dp_packet *clone_pkt = dp_packet_clone(execute->packet);
             dp_packet_batch_init_packet(&batch, clone_pkt);
-            tx_only(dp->channels[odp_to_u32(port_no)].sock, clone_pkt);
-            // error = netdev_send(port->netdev, queue, &batch, false);
-            // VLOG_INFO("--- netdev_send error: %d ---", error);
+            // tx_only(dp->channels[odp_to_u32(port_no)].sock, clone_pkt);
+            error = netdev_send(port->netdev, queue, &batch, false);
+            if (error) {
+                VLOG_INFO("--- netdev_send error: %d ---", error);
+            }
         } else {
             VLOG_INFO("---- Called: %s, another action ----", __func__);
         }
@@ -2559,11 +2421,11 @@ out:
 }
 
 static int
-dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
+dpif_xf_get(const struct dpif *dpif, const struct dpif_flow_get *get)
 {
     VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
-    struct xdp_flow *xdp_flow;
+    struct xf *xf;
     struct dp_xdp_entry_point *ep;
     struct hmapx to_find = HMAPX_INITIALIZER(&to_find);
     struct hmapx_node *node;
@@ -2614,11 +2476,11 @@ dpif_xdp_flow_get(const struct dpif *dpif, const struct dpif_flow_get *get)
         VLOG_INFO("---- Called: %s, get->ufid: %s ----", __func__, ds_cstr(&dsf));
         ep = (struct dp_xdp_entry_point *) node->data;
         VLOG_INFO("---- Called: %s, ep->ep_id: %d ----", __func__, ep->ep_id);
-        xdp_flow = dp_xdp_ep_find_flow(ep, get->ufid, get->key,
+        xf = dp_xdp_ep_find_flow(ep, get->ufid, get->key,
                                               get->key_len);
-        if (xdp_flow) {
-            VLOG_INFO("---- Called: %s, dp_xdp_ep_find_flow xdp_flow not null ----", __func__);
-            dp_xdp_flow_to_dpif_flow(dp, ep->ep_id, xdp_flow, get->buffer,
+        if (xf) {
+            VLOG_INFO("---- Called: %s, dp_xdp_ep_find_flow xf not null ----", __func__);
+            dp_xf_to_dpif_flow(dp, ep->ep_id, xf, get->buffer,
                                         get->buffer, get->flow, false);
             error = 0;
             break;
@@ -2688,7 +2550,7 @@ static int
 dpif_xdp_open(const struct dpif_class *dpif_class,
                 const char *name, bool create, struct dpif **dpifp)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    VLOG_INFO("---- Called: %s name %s----", __func__, name);
     struct dp_xdp *dp;
     int error;
 
@@ -3012,7 +2874,7 @@ dpif_xdp_port_poll_wait(const struct dpif *dpif_)
 }
 
 static int
-dpif_xdp_flow_flush(struct dpif *dpif)
+dpif_xf_flush(struct dpif *dpif)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
     struct dp_xdp *dp = get_dp_xdp(dpif);
@@ -3027,13 +2889,13 @@ dpif_xdp_flow_flush(struct dpif *dpif)
 }
 
 static struct dpif_flow_dump *
-dpif_xdp_flow_dump_create(
+dpif_xf_dump_create(
         const struct dpif *dpif_,
         bool terse,
         struct dpif_flow_dump_types *types)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    struct dpif_xdp_flow_dump *dump;
+    struct dpif_xf_dump *dump;
 
     dump = xzalloc(sizeof *dump);
     dpif_flow_dump_init(&dump->up, dpif_);
@@ -3042,7 +2904,7 @@ dpif_xdp_flow_dump_create(
     /* TODO: check if we need to initialise the bpf_map_pos in dump */
     
     /* TODO: if we need the dpif_flow_dump_types commented out in the
-       dp_xdp_flow_dump then we will need to populate it or initialise it */
+       dp_xf_dump then we will need to populate it or initialise it */
     
     ovs_mutex_init(&dump->mutex);
 
@@ -3050,10 +2912,10 @@ dpif_xdp_flow_dump_create(
 }
 
 static int
-dpif_xdp_flow_dump_destroy(struct dpif_flow_dump *dump_)
+dpif_xf_dump_destroy(struct dpif_flow_dump *dump_)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    struct dpif_xdp_flow_dump *dump = dpif_xdp_flow_dump_cast(dump_);
+    struct dpif_xf_dump *dump = dpif_xf_dump_cast(dump_);
 
     ovs_mutex_destroy(&dump->mutex);
     free(dump);
@@ -3061,12 +2923,12 @@ dpif_xdp_flow_dump_destroy(struct dpif_flow_dump *dump_)
 }
 
 static struct dpif_flow_dump_thread *
-dpif_xdp_flow_dump_thread_create(
+dpif_xf_dump_thread_create(
         struct dpif_flow_dump *dump_)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    struct dpif_xdp_flow_dump *dump = dpif_xdp_flow_dump_cast(dump_);
-    struct dpif_xdp_flow_dump_thread *thread;
+    struct dpif_xf_dump *dump = dpif_xf_dump_cast(dump_);
+    struct dpif_xf_dump_thread *thread;
 
     thread = xmalloc(sizeof *thread);
     dpif_flow_dump_thread_init(&thread->up, &dump->up);
@@ -3076,24 +2938,24 @@ dpif_xdp_flow_dump_thread_create(
 }
 
 static void
-dpif_xdp_flow_dump_thread_destroy(struct dpif_flow_dump_thread *thread_)
+dpif_xf_dump_thread_destroy(struct dpif_flow_dump_thread *thread_)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    struct dpif_xdp_flow_dump_thread *thread
-        = dpif_xdp_flow_dump_thread_cast(thread_);
+    struct dpif_xf_dump_thread *thread
+        = dpif_xf_dump_thread_cast(thread_);
 
     free(thread);
 }
 
 static int
-dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
+dpif_xf_dump_next(struct dpif_flow_dump_thread *thread_,
                           struct dpif_flow *flows, int max_flows)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    struct dpif_xdp_flow_dump_thread *thread
-        = dpif_xdp_flow_dump_thread_cast(thread_);
-    struct dpif_xdp_flow_dump *dump = thread->dump;
-    struct xdp_flow xdp_flows[FLOW_DUMP_MAX_BATCH];
+    struct dpif_xf_dump_thread *thread
+        = dpif_xf_dump_thread_cast(thread_);
+    struct dpif_xf_dump *dump = thread->dump;
+    struct xf xfs[FLOW_DUMP_MAX_BATCH];
     struct dpif_xdp *dpif = dpif_xdp_cast(thread->up.dpif);
     struct dp_xdp *dp = get_dp_xdp(&dpif->dpif);
     int n_flows = 0;
@@ -3117,7 +2979,7 @@ dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
            on these tables are different the will need to search through
            every endpoint hence our do while will need to change
            
-           Secondly xdp_flows[] will need to be a hash table storing or
+           Secondly xfs[] will need to be a hash table storing or
            dumping the flows based on the hash key of the flow such that
            we won't have duplicates. */
         do {
@@ -3131,19 +2993,20 @@ dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
                  * it has been dumped already go to the next */
                 
                 
-                struct xdp_flow *xdp_flow = NULL;
-                int error = xdp_ep_flow_next(ep->flow_map_fd, &dump->flow_pos, &xdp_flow);
+                struct xf *xf = NULL;
+                // int error = xswitch_ep_flow_next(ep->flow_map_fd, &dump->flow_pos, &xf);
+                int error = xswitch_br__flow_next(dp->name, &dump->flow_pos, &xf);
                 // If no flow found break
                 if (error) {
                     break;
                 }
                 
-                memcpy(&dump->flow_pos, &xdp_flow->key, sizeof(struct xdp_flow_key)); // update to next key
-                memcpy(&xdp_flows[n_flows], xdp_flow, sizeof(struct xdp_flow));
+                memcpy(&dump->flow_pos, &xf->key, sizeof(struct xf_key)); // update to next key
+                memcpy(&xfs[n_flows], xf, sizeof(struct xf));
                 ep_ids[n_flows] = ep->ep_id;
             }
             if (n_flows < flow_limit) {
-                memset(&dump->flow_pos, 0, sizeof(struct xdp_flow_key));
+                memset(&dump->flow_pos, 0, sizeof(struct xf_key));
                 dp_xdp_ep_unref(ep);
                 ep = dp_xdp_ep_get_next(dp, &dump->entry_point_pos);
                 if (!ep) {
@@ -3165,14 +3028,14 @@ dpif_xdp_flow_dump_next(struct dpif_flow_dump_thread *thread_,
         struct odputil_keybuf *maskbuf = &thread->maskbuf[i];
         struct odputil_keybuf *keybuf = &thread->keybuf[i];
         struct odputil_keybuf *actbuf = &thread->actbuf[i];
-        struct xdp_flow *xdp_flow = &xdp_flows[i];
+        struct xf *xf = &xfs[i];
         struct dpif_flow *f = &flows[i];
         struct ofpbuf key, mask, act;
 
         ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
         ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
         ofpbuf_use_stack(&act, actbuf, sizeof *actbuf);
-        dp_xdp_flow_to_dpif_flow__(dp, ep_ids[i], xdp_flow, &key, &mask, &act, f,
+        dp_xf_to_dpif_flow__(dp, ep_ids[i], xf, &key, &mask, &act, f,
                                     dump->up.terse);
     }
 
@@ -3191,13 +3054,13 @@ dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
 
         switch (op->type) {
         case DPIF_OP_FLOW_PUT:
-            op->error = dpif_xdp_flow_put(dpif, &op->flow_put);
-            // VLOG_INFO("---- Ended: %s dpif_xdp_flow_put, error: %d  ----", __func__, op->error);
+            op->error = dpif_xf_put(dpif, &op->flow_put);
+            // VLOG_INFO("---- Ended: %s dpif_xf_put, error: %d  ----", __func__, op->error);
             break;
 
         case DPIF_OP_FLOW_DEL:
-            op->error = dpif_xdp_flow_del(dpif, &op->flow_del);
-            // VLOG_INFO("---- Ended: %s dpif_xdp_flow_del, error: %d  ----", __func__, op->error);
+            op->error = dpif_xf_del(dpif, &op->flow_del);
+            // VLOG_INFO("---- Ended: %s dpif_xf_del, error: %d  ----", __func__, op->error);
             break;
 
         case DPIF_OP_EXECUTE:
@@ -3206,8 +3069,8 @@ dpif_xdp_operate(struct dpif *dpif, struct dpif_op **ops, size_t n_ops,
             break;
 
         case DPIF_OP_FLOW_GET:
-            op->error = dpif_xdp_flow_get(dpif, &op->flow_get);
-            // VLOG_INFO("---- Ended: %s dpif_xdp_flow_get, error: %d  ----", __func__, op->error);
+            op->error = dpif_xf_get(dpif, &op->flow_get);
+            // VLOG_INFO("---- Ended: %s dpif_xf_get, error: %d  ----", __func__, op->error);
             break;
         }
     }
@@ -3251,7 +3114,7 @@ dpif_xdp_handlers_set(struct dpif *dpif, uint32_t n_handlers)
 }
 
 static int
-extract_key(struct dp_xdp *dp, const struct xdp_flow_key *key,
+extract_key(struct dp_xdp *dp, const struct xf_key *key,
             struct dp_packet *packet, struct ofpbuf *buf)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
@@ -3278,7 +3141,7 @@ extract_key(struct dp_xdp *dp, const struct xdp_flow_key *key,
 }
 
 static void
-dp_xdp_flow_hash(const void *key, size_t key_len, ovs_u128 *hash)
+dp_xf_hash(const void *key, size_t key_len, ovs_u128 *hash)
 {
     static struct ovsthread_once once = OVSTHREAD_ONCE_INITIALIZER;
     static uint32_t secret;
@@ -3343,24 +3206,12 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
 
     upcall->key = buffer->msg;
     upcall->key_len = buffer->size - pre_key_len;
-    dp_xdp_flow_hash(upcall->key, upcall->key_len, &upcall->ufid);
-
-    struct ds ds = DS_EMPTY_INITIALIZER;
-    ds_put_hex(&ds, &e->header.key, sizeof(struct xdp_flow_key));
-    VLOG_INFO("xdp_key %s \n", ds_cstr(&ds));
-    ds_destroy(&ds);
-
-    struct ds dsx = DS_EMPTY_INITIALIZER;
-    format_key_to_hex(&dsx, &e->header.key);
-    VLOG_INFO("recv_format_key_to_hex %s \n", ds_cstr(&dsx));
-    ds_destroy(&dsx);
+    dp_xf_hash(upcall->key, upcall->key_len, &upcall->ufid);
 
     struct ds dsk = DS_EMPTY_INITIALIZER;
     xdp_flow_key_format(&dsk, &e->header.key);
-    VLOG_INFO("xdp_recv_format_key_to_hex %s \n", ds_cstr(&dsk));
+    VLOG_INFO("--- Called: %s recv from index: %d, flow key %s ----", __func__, e->header.ifindex, ds_cstr(&dsk));
     ds_destroy(&dsk);
-
-    
 out:
     return err;
 }
@@ -3504,12 +3355,12 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
         goto out;
     }
     handler = &dp->handlers[handler_id];
+    
     if (!(handler->n_events > 0)) {
         int retval = 0;
         handler->n_events = 0;
 
         retval = poll(handler->fds, dp->n_channels, opt_timeout);
-        
         if (retval < 0) {
             static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
             VLOG_WARN_RL(&rl, "poll failed (%s)", ovs_strerror(errno));
@@ -3527,13 +3378,14 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
                 idx++;
                 continue;
             }
-
+            int ixd = 0;
             handler->n_events -= rcvd;
             ch->last_poll = time_msec();
         
             /* TODO: make sure recv_from_socket returns EAGAIN when nothing found */
             error = recv_from_socket(dp, buf->header, upcall, buf);
             if (error) {
+                VLOG_INFO("---- Called: %s error %d ----", __func__, error);
                 goto out;
             }
         } else if (handler->fds[idx].revents == POLLERR || // Cater for implicitly polled events
@@ -3626,12 +3478,12 @@ const struct dpif_class dpif_xdp_class = {
     .port_dump_done = dpif_xdp_port_dump_done,
     .port_poll = dpif_xdp_port_poll,
     .port_poll_wait = dpif_xdp_port_poll_wait,
-    .flow_flush = dpif_xdp_flow_flush,
-    .flow_dump_create = dpif_xdp_flow_dump_create,
-    .flow_dump_destroy = dpif_xdp_flow_dump_destroy,
-    .flow_dump_thread_create = dpif_xdp_flow_dump_thread_create,
-    .flow_dump_thread_destroy = dpif_xdp_flow_dump_thread_destroy,
-    .flow_dump_next = dpif_xdp_flow_dump_next,
+    .flow_flush = dpif_xf_flush,
+    .flow_dump_create = dpif_xf_dump_create,
+    .flow_dump_destroy = dpif_xf_dump_destroy,
+    .flow_dump_thread_create = dpif_xf_dump_thread_create,
+    .flow_dump_thread_destroy = dpif_xf_dump_thread_destroy,
+    .flow_dump_next = dpif_xf_dump_next,
     .operate = dpif_xdp_operate,
     .recv_set = dpif_xdp_recv_set,
     .handlers_set = dpif_xdp_handlers_set,
