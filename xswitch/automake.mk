@@ -354,6 +354,7 @@ $(XDP_OBJ): %.o: %.c  Makefile $(EXTRA_DEPS)
 EXTRA_DIST += \
 	xswitch/README \
 	xswitch/nsh.h \
+	xswitch/parsing_xf_key_helpers.h \
 	xswitch/parsing_xdp_key_helpers.h \
 	xswitch/parsing_helpers.h \
 	xswitch/rewrite_helpers.h \
