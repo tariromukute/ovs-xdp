@@ -44,8 +44,8 @@ enum flow_format
     JSON,
     XML
 };
-struct flow_arguments
-{
+
+struct flow_arguments {
     char dp_name[NAME_MAX];
     char if_name[NAME_MAX];
     char file_name[PATH_MAX];
@@ -59,6 +59,7 @@ struct option_wrapper list_flows_options[] = {
     {{"ifname", required_argument, 0, 'i'}, "Show flows install on a specific interface", ""},
     {{"file", required_argument, 0, 'f'}, "File to output or read flows", ""},
     {{"format", required_argument, 0, 't'}, "Displays the output in the specified format", ""},
+    {{"version", required_argument, 0, 'v'}, "The version to be used", ""},
     {{"protocol", required_argument, 0, 'p'}, "Allowed protocol version", ""},
     {{0, 0, 0, 0}, "", ""}};
 

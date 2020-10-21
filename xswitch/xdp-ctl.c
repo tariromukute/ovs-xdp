@@ -13,9 +13,9 @@ static struct global_flags flags = {
     .verbose = 0};
 
 struct command main_cmds[] = {
-    {"dp", "dps [command]", dp_cmd},
-    {"flows", "flows [command]", flow_cmd},
-    {"port", "ports [command]", port_cmd},
+    {"dp", "dp [command]", dp_cmd},
+    {"flow", "flow [command]", flow_cmd},
+    {"port", "port [command]", port_cmd},
     {"logs", "logs [command]", logs_cmd},
     {0, 0, 0}
 };

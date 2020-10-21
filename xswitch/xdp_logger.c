@@ -33,6 +33,7 @@ static void print_ip_addr(const char *type, char *str)
     char buf[INET_ADDRSTRLEN];
     if (1 != sscanf(str, "%u", &addr))
         return;
+
     printf("%s=%s ", type, inet_ntop(AF_INET, ptr, buf, sizeof(buf)));
 }
 

@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include "err.h"
 #include "logging.h"
+#include "xf_netdev.h"
 #include "libxdp.h"
 #include "util.h"
 #include "datapath.h"
@@ -197,7 +198,6 @@ retry:
                 }
             }
         // }
-
         progs[i] = p;
     }
 
@@ -263,7 +263,6 @@ int xdp_prog_default_load(struct xdp_ep *xdp_ep, struct xs_cfg *cfg)
         .section_name = "prog"
     };
 
-    // memcpy(&opt.pin_path, pin_path, PATH_MAX);
     opt.pin_path = (char *)&pin_path;
     char file_name[PATH_MAX];
     int len = snprintf(file_name, PATH_MAX, "%s/%s", cfg->path, default_filename);
@@ -334,7 +333,6 @@ retry:
                 if (strcmp(tx_port, bpf_map__name(map)) == 0) {
                     int m = 1;    
                     for (m = 1; m < 64; ++m) {
-                        pr_info("tx_port %d", m);
                         bpf_map_update_elem(bpf_map__fd(map), &m, &m, 0);
                     }
                 }
@@ -1014,6 +1012,27 @@ out:
     return err;
 }
 
+/* arp table */
+int
+xswitch_arp__add_entry(char *dev, __be32 ip, __u8 mac[ETH_ALEN])
+{
+    int error = 0;
+    // check if mac is valid
+
+    // check if ip is valid
+
+    // check if dev exists
+
+    // add arp entry
+    error = arp__add_entry(dev, ip, mac);
+    if (error) {
+        pr_warn("Failed to add arp entry");
+        goto out;
+    }
+
+out:
+    return error;
+}
 
 /* flows based on entry point */
 int xswitch_ep_flow_lookup(int map_fd, struct xf_key *key, struct xf **flowp)

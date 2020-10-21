@@ -332,6 +332,7 @@ enum xf_action_attr {
     XF_ACTION_ATTR_METER,        /* u32 meter ID. */
     XF_ACTION_ATTR_CLONE,        /* Nested OVS_CLONE_ATTR_*.  */
     XF_ACTION_ATTR_DROP,
+    XF_ACTION_ATTR_NORMAL,       /* Act on the packet as the network stack normally would */
     __XF_ACTION_ATTR_MAX,          /* Nothing past this will be accepted
                        * from userspace. */
 

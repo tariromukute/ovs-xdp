@@ -310,8 +310,8 @@ void xdp_flow_key_format(struct ds *ds, struct xf_key *key)
         ds_put_format(ds, "arp_sha=(%s), arp_tha=(%s) arp_op=0x%x, arp_sip=(%s), arp_tip=(%s)",
                        sha,
                        arp,
-                       //    ntohs(key->arph.arp_op), TODO: fix this
-                       0,
+                        ntohs(key->arph.ar_op), // TODO: fix this
+                    //    0,
                        inet_ntop(AF_INET, src_ptr, src_buf, sizeof(src_buf)),
                        inet_ntop(AF_INET, dst_ptr, dst_buf, sizeof(dst_buf)));
     }

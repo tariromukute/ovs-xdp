@@ -16,6 +16,7 @@
 #include <string.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
+#include <linux/netdevice.h>
 #include "flow.h"
 #include "xf.h"
 #include "parsing_helpers.h"
@@ -108,12 +109,12 @@ struct {
 
 /* map #4 */
 struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY_OF_MAPS);
+    __uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
     __uint(max_entries, 64);
-    __uint(key_size, sizeof(__u32));
+    __uint(key_size, IFNAMSIZ);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
     __array(values, struct micro_flow_map);
-} _xf_ports_map SEC(".maps");
+} bridge SEC(".maps");
 
 /* Note: High values of max_entries are resulting in program load error: 'Program too big' 
  * Trying to pin the map so that it's shared is also resulting in load time error. So for

@@ -352,6 +352,23 @@ xswitch_br__flow_remove(char *brname, struct xf_key *key);
 int
 xswitch_br__flow_flush(char *brname);
 
+/* management of bridge */
+// int
+// xswitch_br__create(const char *brname);
+
+// int
+// xswitch_br__delete(const char *brname);
+
+// int
+// xswitch_br__add_port(const char *brname, const char *ifname);
+
+// int
+// xswitch_br__remove_port(const char *brname, const char *ifname);
+
+/* arp table */
+int
+xswitch_arp__add_entry(char *dev, __be32 ip, __u8 mac[ETH_ALEN]);
+
 /* entry point flow stats */
 int
 xdp_ep_flow_stats_lookup(int map_fd, struct xdp_flow_key *key, struct xdp_flow *flow);

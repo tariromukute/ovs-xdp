@@ -322,6 +322,7 @@ enum xdp_action_attr {
     XDP_ACTION_ATTR_METER,        /* u32 meter ID. */
     XDP_ACTION_ATTR_CLONE,        /* Nested OVS_CLONE_ATTR_*.  */
     XDP_ACTION_ATTR_DROP,
+    XDP_ACTION_ATTR_NORMAL,       /* Act on the packet as the network stack normally would */
     __XDP_ACTION_ATTR_MAX,          /* Nothing past this will be accepted
                        * from userspace. */
 

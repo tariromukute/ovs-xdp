@@ -17,7 +17,7 @@
 #include "actions.h"
 
 SEC("prog")
-int xdp_ep_inline_actions(struct xdp_md *ctx)
+int xdp_xs_inline_actions(struct xdp_md *ctx)
 {
     bpf_printk("------------------------------------------------\n");
     int action = XDP_PASS;
@@ -39,38 +39,20 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
     bpf_printk("Flow key has valid: %d\n", key.valid);
     
     // // if arp deal with it
-    // if (key.valid & ARP_VALID) {
-    //     bpf_printk("Flow key is arp\n");
-    //     __u32 port_no = 2 ;
-    //     int ret = xdp_output(ctx, port_no);
-    //     if (ret < 0)
-    //         action = XDP_ABORTED;
-            
-    //     bpf_printk("action is: %d\n", ret);
-    //     action = ret;
-    //     // action = XDP_PASS;
-    //     goto out; // output should be the last action where included
-    // }
+    if (key.valid & ARP_VALID) {
+        action = XDP_PASS;
+        goto out; // output should be the last action where included
+    }
     struct xfa_buf *acts = bpf_map_lookup_elem(&_xf_macro_map, &key);
-    if (!acts || key.valid & ARP_VALID) /* If there are no flow actions, make an upcall */
+    if (!acts) /* If there are no flow actions, run output */
     {
-        bpf_printk("Flow entry not found, doing upcall\n");
-        int index = xdp_upcall(ctx, &key);
-        if (index < 0) {
-            goto out;
-        }
-        // /* NOTE: if you don't put bpf_redirect_map in the program that you load to on the interface
-        //  * and rather put it in a tail program e.g., bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL)
-        //  * and you create a xsk_socket for the interface. The xsk_socket seems to be created without an error
-        //  * but on trying to do xsk_socket__fd(xsk_socket->xsk) you get a segmentation fault. This is resolved
-        //  * by putting bpf_redirect_map(&xsks_map, index, 0) directly into the program loaded. However, calling
-        //  * bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL) i.e, invoking a tail program that will send
-        //  * to a xsk_socket, before bpf_redirect_map(&xsks_map, index, 0) will still result in the packets being
-        //  * delivered, i.e, being sent by the tail program and not the bpf_redirect_map TODO: check the libbpf or 
-        //  * helper function why this is, it maybe due to some 'enforced' logic that can be changed */
-        if (bpf_map_lookup_elem(&xsks_map, &index))
-            return bpf_redirect_map(&xsks_map, index, 0);
-
+        int port_no = 0;
+        int ret = xdp_output(ctx, port_no);
+        if (ret < 0)
+            action = XDP_ABORTED;
+            
+        bpf_printk("action is: %d\n", ret);
+        action = ret;
         goto out;
     }
 
