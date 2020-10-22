@@ -73,7 +73,6 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
 
         goto out;
     }
-
     bpf_printk("Flow entry found, processing flow actions\n");
 
     /* Check that the number of actions is less that the maximum */
@@ -102,7 +101,6 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         } else if (ret == 0) {
             break;            
         }
-
         bpf_printk("Processing action type: %d\n", a.hdr.type);
         switch(a.hdr.type) {
             case XDP_ACTION_ATTR_UNSPEC: {
@@ -112,21 +110,18 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
                 break;
             }
             case XDP_ACTION_ATTR_NORMAL: {
-                __u32 *port_no = (__u32 *)&a.data ;
-                ret = xdp_output(ctx, *port_no);
+                ret = xdp_normal(ctx);
                 if (ret < 0)
                     action = XDP_ABORTED;
                 action = ret;
-                // action = XDP_PASS;
                 goto out; // output should be the last action where included
             }
             case XDP_ACTION_ATTR_OUTPUT: {
-                __u32 *port_no = (__u32 *)&a.data ;
-                ret = xdp_output(ctx, *port_no);
+                __u32 *ifindex = (__u32 *)&a.data;
+                ret = xdp_output(ctx, *ifindex);
                 if (ret < 0)
                     action = XDP_ABORTED;
                 action = ret;
-                // action = XDP_PASS;
                 goto out; // output should be the last action where included
             }
             case XDP_ACTION_ATTR_USERSPACE: {

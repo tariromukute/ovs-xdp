@@ -124,7 +124,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(int));
-    __uint(max_entries, 64);
+    __uint(max_entries, 128);
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } tx_port SEC(".maps");
 
@@ -175,6 +175,8 @@ static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, st
             }
 
             memcpy(&key->udph, udph, sizeof(struct xf_key_udp));
+            bpf_printk("udph->udp_src %d\n", udph->udp_src);
+            bpf_printk("key->udph.udp_src %d\n", key->udph.udp_src);
             key->valid |= UDP_VALID;
         }
         else if (nh_type == IPPROTO_SCTP)

@@ -10,9 +10,9 @@ int bridge__create(const char *brname)
     int sfd;
 
     if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
  
     int ret = ioctl(sfd, SIOCBRADDBR, brname);
  
@@ -33,9 +33,9 @@ int bridge__delete(const char *brname)
     int sfd;
 
     if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
  
     int ret = ioctl(sfd, SIOCBRDELBR, brname);
  
@@ -58,30 +58,30 @@ int bridge__add_port(const char *brname, const char *ifname)
  
     memset(&ifr, 0, sizeof(ifr));
     
-	if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+    if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
 
-	strncpy(ifr.ifr_name, brname, IFNAMSIZ);
+    strncpy(ifr.ifr_name, brname, IFNAMSIZ);
 
-	ifr.ifr_ifindex = if_nametoindex(ifname);
-	ret = ioctl(sfd, SIOCBRADDIF, &ifr);
-	if (ret < 0)
-	{
+    ifr.ifr_ifindex = if_nametoindex(ifname);
+    ret = ioctl(sfd, SIOCBRADDIF, &ifr);
+    if (ret < 0)
+    {
         pr_debug("SIOCBRADDIF, Attach interface failed");
-		unsigned long args[4] = { BRCTL_ADD_IF, ifr.ifr_ifindex, 0, 0 };
+        unsigned long args[4] = { BRCTL_ADD_IF, ifr.ifr_ifindex, 0, 0 };
 
-		ifr.ifr_data = (char *) args;
-		ret = ioctl(sfd, SIOCDEVPRIVATE, &ifr);
-	}
+        ifr.ifr_data = (char *) args;
+        ret = ioctl(sfd, SIOCDEVPRIVATE, &ifr);
+    }
     if (ret < 0) {
         pr_warn("Attach interface failed");
         close(sfd);
         return errno;
     }
 
-	close(sfd);
+    close(sfd);
     return error;
 }
 
@@ -91,32 +91,32 @@ int bridge__remove_port(const char *brname, const char *ifname)
     int sfd, saved_errno, ret;
     struct ifreq ifr;
     
-	memset (&ifr, 0, sizeof(ifr));
+    memset (&ifr, 0, sizeof(ifr));
 
-	if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+    if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
 
-	strncpy(ifr.ifr_name, brname, IFNAMSIZ);
+    strncpy(ifr.ifr_name, brname, IFNAMSIZ);
 
-	ifr.ifr_ifindex = if_nametoindex(ifname);
-	ret = ioctl(sfd, SIOCBRDELIF, &ifr);
-	if (ret < 0)
-	{
+    ifr.ifr_ifindex = if_nametoindex(ifname);
+    ret = ioctl(sfd, SIOCBRDELIF, &ifr);
+    if (ret < 0)
+    {
         pr_debug("SIOCBRDELIF, Detach interface failed");
-		unsigned long args[4] = { BRCTL_DEL_IF, ifr.ifr_ifindex, 0, 0 };
+        unsigned long args[4] = { BRCTL_DEL_IF, ifr.ifr_ifindex, 0, 0 };
 
-		ifr.ifr_data = (char *) args;
-		ret = ioctl(sfd, SIOCDEVPRIVATE, &ifr);
-	}
+        ifr.ifr_data = (char *) args;
+        ret = ioctl(sfd, SIOCDEVPRIVATE, &ifr);
+    }
     if (ret < 0) {
         pr_warn("Detach interface failed");
         close(sfd);
         return errno;
     }
 
-	close(sfd);
+    close(sfd);
     return error;
 }
 
@@ -128,9 +128,9 @@ int arp__add_entry(char *dev, __be32 ip, __u8 mac[ETH_ALEN])
     struct sockaddr_in *sin;
  
     if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
  
     sin = (struct sockaddr_in *)&(arp_req.arp_pa);
  
@@ -158,9 +158,9 @@ int arp__del_entry(char *dev, __be32 ip)
     struct sockaddr_in *sin;
  
     if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
  
     sin = (struct sockaddr_in *)&(arp_req.arp_pa);
     memset(&arp_req, 0, sizeof(arp_req));
@@ -192,9 +192,9 @@ int arp__show_entry(const char *dev, __be32 ip)
     strncpy(arp_req.arp_dev, dev, IFNAMSIZ-1);
  
     if ((sfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-		pr_warn("Failed to create socket");
+        pr_warn("Failed to create socket");
         return errno;
-	}
+    }
  
     ret = ioctl(sfd, SIOCGARP, &arp_req);
     if (ret < 0) {

@@ -693,9 +693,11 @@ static __always_inline int xfa_put(struct xfa_buf *acts, __u32 type, struct xfa_
 
     if (data) {
         memcpy(act.data, data, size);
+    } else {
+        return -2;
     }
 
-    memcpy(&acts->data[pos], &act, len);
+    memcpy(&acts->data[pos], &act, sizeof(struct xf_act));
 
     acts->hdr.len += len;
     acts->hdr.num += 1;

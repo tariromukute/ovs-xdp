@@ -51,13 +51,26 @@ static __always_inline int ip_decrease_ttl(struct iphdr *iph)
     return --iph->ttl;
 }
 
-static __always_inline int xdp_output(struct xdp_md *ctx, __u32 port_no)
+static __always_inline int xdp_output(struct xdp_md *ctx, __u32 ifindex)
+{
+    int action = XDP_PASS;
+    if (log_level & LOG_DEBUG) {
+        char msg[LOG_MSG_SIZE] = "Executing xdp_normal action";
+        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    }
+    
+    bpf_printk("xdp_output ifindex: %d\n", ifindex);
+    action = bpf_redirect_map(&tx_port, ifindex, 0);
+    return action;
+}
+
+static __always_inline int xdp_normal(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
     if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_output action";
+        char msg[LOG_MSG_SIZE] = "Executing xdp_normal action";
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
 
@@ -148,7 +161,7 @@ static __always_inline int xdp_output(struct xdp_md *ctx, __u32 port_no)
 
     fib_params.ifindex = ctx->ingress_ifindex;
     bpf_printk("ctx->ingress_ifindex: %d\n", ctx->ingress_ifindex);
-    rc = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), 0);
+    rc = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), BPF_FIB_LOOKUP_DIRECT);
     switch (rc) {
     case BPF_FIB_LKUP_RET_SUCCESS:         /* lookup successful */
         bpf_printk("BPF_FIB_LKUP_RET_SUCCESS\n");
@@ -210,6 +223,7 @@ static __always_inline int xdp_output(struct xdp_md *ctx, __u32 port_no)
 out:
     return action;
 }
+
 static __always_inline int xdp_userspace(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;

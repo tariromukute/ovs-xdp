@@ -332,7 +332,7 @@ retry:
 
                 if (strcmp(tx_port, bpf_map__name(map)) == 0) {
                     int m = 1;    
-                    for (m = 1; m < 64; ++m) {
+                    for (m = 1; m < 128; ++m) {
                         bpf_map_update_elem(bpf_map__fd(map), &m, &m, 0);
                     }
                 }

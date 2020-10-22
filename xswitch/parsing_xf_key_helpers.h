@@ -236,7 +236,8 @@ static __always_inline int parse_xf_key_udphdr(struct hdr_cursor *nh,
         .udp_src = h->source,
         .udp_dst = h->dest
     };
-
+    bpf_printk("udp.udp_src %d\n", udp.udp_src);
+    bpf_printk("h->source %d\n", h->source);
     *key_udp = &udp;
     nh->pos  = h + 1;
 

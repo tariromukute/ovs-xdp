@@ -408,7 +408,7 @@ static int dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
 static int dpif_xf_get(const struct dpif *dpif, const struct dpif_flow_get *get);
 
 enum odp_key_fitness xf_key_to_flow(const struct xf_key *key, struct flow *flow);
-static int xf_actions_to_odp_actions(const struct xfa_buf *xdp_acts,
+static int xf_actions_to_odp_actions(const struct dp_xdp *dp, const struct xfa_buf *xdp_acts,
                 struct ofpbuf *out);
 
 static void xsk_free_umem_frame(struct xsk_socket_info *xsk, uint64_t frame)
@@ -603,7 +603,6 @@ static odp_port_t
 choose_port(struct dp_xdp *dp, const char *name)
     OVS_REQUIRES(dp->port_mutex)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
     uint32_t port_no;
 
     if (!is_dp_xdp(dp)) {
@@ -644,7 +643,6 @@ static int
 port_create(const char *devname, const char *type,
             odp_port_t port_no, struct dp_xdp_port **portp)
 {
-    VLOG_INFO("---- Called: %s, type %s port_no: %d ----", __func__, type, odp_to_u32(port_no));
     int error = 0;
     struct dp_xdp_port *port;
     enum netdev_flags flags;
@@ -686,7 +684,6 @@ port_create(const char *devname, const char *type,
     ovs_mutex_init(&port->txq_used_mutex);
 
     *portp = port;
-    VLOG_INFO("---- Ended: %s, type %s port_no: %d ----", __func__, type, odp_to_u32(port_no));
     return 0;
 
 out:
@@ -699,7 +696,6 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
             odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex)
 {
-    VLOG_INFO("---- Called: %s, port name: %s ----", __func__, devname);
     struct dp_xdp_port *port;
     struct dp_xdp_entry_point *ep;
     struct xsk_socket_info *sock = NULL;
@@ -755,7 +751,6 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
     int fd = xsk_socket__fd(sock->xsk);
     port->upcall_pids[0] = fd;
 
-    VLOG_INFO("--- Called: %s xsk_socket__fd: %d ----", __func__, fd);
     error = port_add_channel(dp, port_no, sock);
 out:
     if (error) {
@@ -819,11 +814,8 @@ static int
 port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
                   struct xsk_socket_info *sock)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
-    // struct epoll_event event;
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
-    // int error;
 
     if (dp->handlers == NULL) {
         xsk_sock_close(sock);
@@ -1175,7 +1167,7 @@ create_dp_xdp(const char *name, const struct dpif_class *class,
 }
 
 static int
-xf_actions_to_odp_actions(const struct xfa_buf *xdp_acts, struct ofpbuf *out)
+xf_actions_to_odp_actions(const struct dp_xdp *dp, const struct xfa_buf *xdp_acts, struct ofpbuf *out)
 {
     __u32 len = 0;
     __u32 acts_len = xdp_acts->hdr.len;
@@ -1200,8 +1192,13 @@ xf_actions_to_odp_actions(const struct xfa_buf *xdp_acts, struct ofpbuf *out)
             if (act->hdr.len - hdr_len != sizeof(__u32)) {
                 return -EINVAL;
             }
-            /* TODO: ifindex to odp translation */
-            nl_msg_put_u32(out, OVS_ACTION_ATTR_OUTPUT, (uint32_t) *act->data);
+            __u32 *ifindex = (__u32 *)act->data;
+            struct dp_xdp_port *port = NULL;
+            int err = get_port_by_ifindex(dp, *ifindex, &port);
+            if (err)
+                goto error;
+
+            nl_msg_put_odp_port(out, OVS_ACTION_ATTR_OUTPUT, port->port_no);
             break;
         }
         case XDP_ACTION_ATTR_PUSH_VLAN: {
@@ -1282,6 +1279,9 @@ xf_actions_to_odp_actions(const struct xfa_buf *xdp_acts, struct ofpbuf *out)
         len += act->hdr.len;
     }
     return 0;
+
+error:
+    return -1;
 }
 
 enum odp_key_fitness
@@ -1348,10 +1348,9 @@ xf_key_to_flow(const struct xf_key *key, struct flow *flow)
 }
 
 static int
-dpif_xf_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_len,
+dpif_xf_actions_from_nlattrs(const struct dp_xdp *dp, const struct nlattr *acts, uint32_t actions_len,
                               struct xfa_buf *xdp_acts, bool probe)
 {
-    // VLOG_INFO("---- Called: %s ----", __func__);
     /* TODO: indicate the key actions that can't be handled by xdp datapath  */
     const struct nlattr *a;
     size_t left;
@@ -1363,7 +1362,6 @@ dpif_xf_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_len,
     NL_ATTR_FOR_EACH(a, left, acts, actions_len) {
         enum ovs_action_attr type = nl_attr_type(a);
         __u32 hdr_type = 0;
-        void *data = NULL;
 
         switch (type) {
         case OVS_ACTION_ATTR_UNSPEC: {
@@ -1372,11 +1370,19 @@ dpif_xf_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_len,
             break;
         }
         case OVS_ACTION_ATTR_OUTPUT: {
-            len = nl_attr_get_size(a);
             hdr_type = XDP_ACTION_ATTR_OUTPUT;
+            odp_port_t port_no = nl_attr_get_odp_port(a);
+            struct dp_xdp_port *port = NULL;
+            int err = get_port_by_number(dp, port_no, &port);
+            if (err)
+                goto out;
 
-            int port = nl_attr_get_odp_port(a);
-            data = (void *)&port;
+            int ifindex = port->ifindex;
+            len = sizeof(int);
+            int ret = xfa_put(xdp_acts, hdr_type, &cursor, &ifindex, len);
+            if (ret < 0)
+                return ODP_FIT_ERROR;
+
             break;
         }
         case OVS_ACTION_ATTR_TRUNC: {
@@ -1492,15 +1498,12 @@ dpif_xf_actions_from_nlattrs(const struct nlattr *acts, uint32_t actions_len,
         case OVS_ACTION_ATTR_XDPNSH:
         case __OVS_ACTION_ATTR_MAX:
         default:
-            VLOG_INFO("---- Called: %s dpif_xf_actions_from_nlattrs type %d----", __func__, type);
-            return ODP_FIT_ERROR;
-        }
-        int ret = xfa_put(xdp_acts, hdr_type, &cursor, data, len);
-        if (ret < 0) {
+            VLOG_WARN("---- Called: %s dpif_xf_actions_from_nlattrs type %d----", __func__, type);
             return ODP_FIT_ERROR;
         }
     }
-    // xdp_acts->cursor.len = acts_len;
+
+out:
     return ODP_FIT_PERFECT;
 }
 
@@ -1792,17 +1795,9 @@ static int dp_xdp_ep_update_flow(const struct dp_xdp_entry_point *ep,
                         struct xf *flow)
 {
     // VLOG_INFO("---- Called: %s ----", __func__);
-    int error = 0;
-
     struct dp_xdp *dp = ep->dp;
-    // error = xswitch_ep_flow_insert(ep->flow_map_fd, flow);
-    struct ds ds = DS_EMPTY_INITIALIZER;
-    xdp_flow_key_format(&ds, &flow->key);
-    VLOG_INFO("---- Called: %s flow key %s ------", __func__, ds_cstr(&ds));
-    ds_destroy(&ds);
 
-    error = xswitch_br__flow_insert(dp->name, flow);
-    return error;   
+    return xswitch_br__flow_insert(dp->name, flow);
 }
 
 static struct dpif_xf_dump *
@@ -2051,7 +2046,7 @@ dp_xf_to_dpif_flow__(const struct dp_xdp *dp, int ep_id,
         /* Actions */
         offset = act_buf->size;
         dpif_flow->actions = ofpbuf_tail(act_buf);
-        int error = xf_actions_to_odp_actions(&xf->actions, act_buf);
+        int error = xf_actions_to_odp_actions(dp, &xf->actions, act_buf);
         if (error) {
             VLOG_WARN("---- Called: %s, one of the xfa_buf to odp_actions failed ----", __func__);
         }
@@ -2084,7 +2079,7 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
     struct xfa_buf acts;
     int error = 0;
 
-    error = dpif_xf_actions_from_nlattrs(put->actions, put->actions_len, &acts,
+    error = dpif_xf_actions_from_nlattrs(ep->dp, put->actions, put->actions_len, &acts,
                                         true);
     if (error) {
         VLOG_INFO("---- Called: %s, error from dpif_xf_actions_from_nlattrs ----", __func__);
@@ -2166,7 +2161,6 @@ dpif_xf_put(struct dpif *dpif, const struct dpif_flow_put *put)
 {
     // VLOG_INFO("---- Called: %s pmd_id %d ----", __func__, put->pmd_id);
     struct dp_xdp *dp = get_dp_xdp(dpif);
-    struct xf_key key; //, mask;
     struct dp_xdp_entry_point *ep;
     ovs_u128 ufid;
     int error = 0;
@@ -2175,6 +2169,9 @@ dpif_xf_put(struct dpif *dpif, const struct dpif_flow_put *put)
     if (put->stats) {
         memset(put->stats, 0, sizeof *put->stats);
     }
+
+    struct xf_key key;
+    memset(&key, 0, sizeof(struct xf_key));
     /* TODO: implement method */
     error = dpif_xf_key_from_nlattrs(put->key, put->key_len, &key,
                                         probe);
@@ -2396,6 +2393,7 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
             if (bpf_ntohs(execute->flow->dl_type) == ETH_P_ARP
                 || bpf_ntohs(execute->flow->dl_type) == ETH_P_RARP) {
                 port_no = nl_attr_get_odp_port(a);
+                VLOG_INFO("--- Called: %s arp port_no %d ----", __func__, odp_to_u32(port_no));
                 struct dp_xdp_port *port_in;
                 odp_port_t in_port = execute->flow->in_port.odp_port;
                 ovs_mutex_lock(&dp->port_mutex);
@@ -2412,26 +2410,39 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
 
                 // add to arp table
                 error = xswitch_arp__add_entry(port_in->name, execute->flow->nw_src, execute->flow->arp_sha.ea);
-                if (error)
+                if (error) {
+                    VLOG_WARN("--- Called: %s error xswitch_arp__add_entry ---", __func__);
                     continue;
+                }
             } else {
                 port_no = execute->flow->in_port.odp_port;
             }
-
+            
             ovs_mutex_lock(&dp->port_mutex);
             error = get_port_by_number(dp, port_no, &port);
             ovs_mutex_unlock(&dp->port_mutex);
-             if (error) {
+            if (error) {
                 goto out;
             }
 
             struct dp_packet_batch batch;
             struct dp_packet *clone_pkt = dp_packet_clone(execute->packet);
             dp_packet_batch_init_packet(&batch, clone_pkt);
+
+            struct flow flow;
+            flow_extract(clone_pkt, &flow);
+
+            struct ds ds = DS_EMPTY_INITIALIZER;
+            flow_format(&ds, &flow, NULL);
+            VLOG_INFO("--- Called: %s out_port %d, flow %s ---", __func__, odp_to_u32(port->port_no), ds_cstr(&ds));
+            ds_destroy(&ds);
+
             // tx_only(dp->channels[odp_to_u32(port_no)].sock, clone_pkt);
             error = netdev_send(port->netdev, queue, &batch, false);
-            if (error)
+            if (error) {
+                VLOG_INFO("--- Called: %s error sending out ---", __func__);
                 continue;
+            }
         }
     }
     
@@ -3152,7 +3163,7 @@ static int
 xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
                         struct dpif_upcall *upcall, struct ofpbuf *buffer)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     size_t pkt_len = e->header.pkt_len;
     size_t pre_key_len;
     struct dp_xdp_port *port;
@@ -3205,7 +3216,7 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
 
     struct ds dsk = DS_EMPTY_INITIALIZER;
     xdp_flow_key_format(&dsk, &e->header.key);
-    VLOG_INFO("--- Called: %s recv from index: %d, flow key %s ----", __func__, e->header.ifindex, ds_cstr(&dsk));
+    // VLOG_INFO("--- Called: %s recv from index: %d, flow key %s ----", __func__, e->header.ifindex, ds_cstr(&dsk));
     ds_destroy(&dsk);
 out:
     return err;
@@ -3269,10 +3280,8 @@ xsk_socket_read(struct xsk_socket_info *xsk, struct ofpbuf *buf, struct pollfd *
     rcvd = xsk_ring_cons__peek(&xsk->rx, RX_BATCH_SIZE, &idx_rx);
     if (!rcvd) {
         if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq)) {
-            VLOG_INFO("---- Called: %s wakeup_needed ----", __func__);
             ret = poll(fds, n_socks, 0);
         }
-        // VLOG_INFO("---- Called: %s xsk_ring_cons__peek ----", __func__);
         return -1;
     }
 
@@ -3313,7 +3322,6 @@ xsk_socket_read(struct xsk_socket_info *xsk, struct ofpbuf *buf, struct pollfd *
     xsk_ring_cons__release(&xsk->rx, read);
     xsk->stats.rx_packets += read;
 
-    VLOG_INFO("---- Called: %s rcvd %d read: %d ----", __func__, rcvd, read);
     return read;
 }
 
@@ -3406,7 +3414,8 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
     }
 
 out:
-    poll_immediate_wake();
+    // poll_immediate_wake();
+    poll_timer_wait(opt_timeout);
     fat_rwlock_unlock(&dp->upcall_lock);
     return error;
 }
@@ -3431,7 +3440,7 @@ dpif_xdp_recv_wait(struct dpif *dpif, uint32_t handler_id)
 
     //     poll_fd_wait(handler->epoll_fd, POLLIN);
     // }
-    poll_immediate_wake();
+    poll_timer_wait(opt_timeout);
     fat_rwlock_unlock(&dp->upcall_lock);
     // VLOG_INFO("---- Edded: %s handler_id: %d ----", __func__, handler_id);
 }
