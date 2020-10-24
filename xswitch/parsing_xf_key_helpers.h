@@ -111,7 +111,7 @@ static inline int parse_xf_key_arp(struct hdr_cursor *nh,
 
 static inline int parse_xf_key_ip6hdr(struct hdr_cursor *nh,
                     void *data_end,
-                    struct xf_key_ipv6 **key_ipv6)
+                    struct xf_key_ipv6 *key_ipv6)
 {
     struct ipv6hdr *ip6h = nh->pos;
 
@@ -122,26 +122,22 @@ static inline int parse_xf_key_ip6hdr(struct hdr_cursor *nh,
     if (ip6h + 1 > data_end)
         return -1;
 
-    struct xf_key_ipv6 ipv6;
-    memset(&ipv6, 0, sizeof(struct xf_key_ipv6));
-    ipv6.ipv6_proto = ip6h->nexthdr;
-    ipv6.ipv6_tclass = ip6h->priority;
-    ipv6.ipv6_hlimit = ip6h->hop_limit;
-    ipv6.ipv6_frag = 0;
+    key_ipv6->ipv6_proto = ip6h->nexthdr;
+    key_ipv6->ipv6_tclass = ip6h->priority;
+    key_ipv6->ipv6_hlimit = ip6h->hop_limit;
+    key_ipv6->ipv6_frag = 0;
 
-    memcpy(&ipv6.ipv6_dst, ip6h->daddr.s6_addr32, sizeof(ipv6.ipv6_dst));
-    memcpy(&ipv6.ipv6_src, ip6h->saddr.s6_addr32, sizeof(ipv6.ipv6_src));
-    // memcpy(&ipv6.ipv6_label, 0, sizeof(ipv6.ipv6_label)); /* TODO: fix this */
+    memcpy(&key_ipv6->ipv6_dst, ip6h->daddr.s6_addr32, sizeof(key_ipv6->ipv6_dst));
+    memcpy(&key_ipv6->ipv6_src, ip6h->saddr.s6_addr32, sizeof(key_ipv6->ipv6_src));
 
     nh->pos = ip6h + 1;
-    *key_ipv6 = &ipv6;
 
     return ip6h->nexthdr;
 }
 
 static __always_inline int parse_xf_key_iphdr(struct hdr_cursor *nh,
                                        void *data_end,
-                                       struct xf_key_ipv4 **key_ipv4)
+                                       struct xf_key_ipv4 *key_ipv4)
 {
     struct iphdr *iph = nh->pos;
     
@@ -156,17 +152,13 @@ static __always_inline int parse_xf_key_iphdr(struct hdr_cursor *nh,
     if (nh->pos + hdrsize > data_end)
             return -1;
 
-    struct xf_key_ipv4 ipv4;
-    memset(&ipv4, 0, sizeof(struct xf_key_ipv4));
-    ipv4.ipv4_src = iph->saddr;
-    ipv4.ipv4_dst = iph->daddr;
-    ipv4.ipv4_proto = iph->protocol;
-    ipv4.ipv4_tos = iph->tos;
-    ipv4.ipv4_ttl = iph->ttl;
+    key_ipv4->ipv4_src = iph->saddr;
+    key_ipv4->ipv4_dst = iph->daddr;
+    key_ipv4->ipv4_proto = iph->protocol;
+    key_ipv4->ipv4_tos = iph->tos;
+    key_ipv4->ipv4_ttl = iph->ttl;
 
-    bpf_printk("--- iph->protocol %d ----\n");
     nh->pos += hdrsize;
-    *key_ipv4 = &ipv4;
 
     return iph->protocol;
 }
@@ -175,43 +167,28 @@ static __always_inline int parse_xf_key_icmp6hdr(struct hdr_cursor *nh,
                       void *data_end,
                       struct xf_key_icmpv6 **key_icmpv6)
 {
-    struct icmp6hdr *icmp6h = nh->pos;
+    struct xf_key_icmpv6 *icmpv6 = nh->pos;
 
-    if (icmp6h + 1 > data_end)
+    if (icmpv6 + 1 > data_end)
         return -1;
 
-    struct xf_key_icmpv6 icmpv6 = {
-        .icmpv6_type = icmp6h->icmp6_type,
-        .icmpv6_code = icmp6h->icmp6_code 
-    };
-    *key_icmpv6 = &icmpv6;
+    *key_icmpv6 = icmpv6;
 
-    nh->pos = icmp6h + 1;
-
-    return icmp6h->icmp6_type;
+    return 0;
 }
 
 static __always_inline int parse_xf_key_icmphdr(struct hdr_cursor *nh,
                                          void *data_end,
                                          struct xf_key_icmp **key_icmp)
 {
-    struct icmphdr *icmph = nh->pos;
+    struct xf_key_icmp *icmp = nh->pos;
 
-    if (icmph + 1 > data_end)
+    if (icmp + 1 > data_end)
         return -1;
 
-    bpf_printk("icmph->type: %u", icmph->type);
-    bpf_printk("icmph->code: %u", icmph->code);
-    struct xf_key_icmp icmp = {
-        .icmp_type = icmph->type,
-        .icmp_code = icmph->code
-    };
-    bpf_printk("icmp.type: %u", icmp.icmp_type);
-    bpf_printk("icmp.code: %u", icmp.icmp_code);
-    *key_icmp = &icmp;
-    nh->pos  = icmph + 1;
+    *key_icmp = icmp;
 
-    return icmph->type;
+    return 0;
 }
 
 /*
@@ -221,27 +198,14 @@ static __always_inline int parse_xf_key_udphdr(struct hdr_cursor *nh,
                     void *data_end,
                     struct xf_key_udp **key_udp)
 {
-    int len;
-    struct udphdr *h = nh->pos;
+    struct xf_key_udp *udp = nh->pos;
 
-    if (h + 1 > data_end)
-        return -1;
-    
-
-    len = bpf_ntohs(h->len) - sizeof(struct udphdr);
-    if (len < 0)
+    if (udp + 1 > data_end)
         return -1;
 
-    struct xf_key_udp udp = {
-        .udp_src = h->source,
-        .udp_dst = h->dest
-    };
-    bpf_printk("udp.udp_src %d\n", udp.udp_src);
-    bpf_printk("h->source %d\n", h->source);
-    *key_udp = &udp;
-    nh->pos  = h + 1;
+    *key_udp = udp;
 
-    return len;
+    return 0;
 }
 
 /*
@@ -251,60 +215,30 @@ static __always_inline int parse_xf_key_tcphdr(struct hdr_cursor *nh,
                     void *data_end,
                     struct xf_key_tcp **key_tcp)
 {
-    int len;
-    struct tcphdr *h = nh->pos;
+    struct xf_key_tcp *tcp = nh->pos;
 
-    if (h + 1 > data_end)
+    if (tcp + 1 > data_end)
         return -1;
 
-    len = h->doff * 4;
-    if ((void *) h + len > data_end)
-        return -1;
+    *key_tcp = tcp;
 
-    struct xf_key_tcp tcp = {
-        .tcp_src = h->source,
-        .tcp_dst = h->dest
-    };
-
-    *key_tcp = &tcp;
-
-    nh->pos  = h + 1;
-
-    return len;
+    return 0;
 }
 
 static __always_inline int parse_xf_key_nsh_base(struct hdr_cursor *nh,
                                        void *data_end,
                                        struct xf_key_nsh_base **key_nsh_base)
 {
-    struct nshhdr *nshh = nh->pos;
-    
-    if (nshh + 1 > data_end)
+    struct xf_key_nsh_base *nsh_base = nh->pos;
+
+    if (nsh_base + 1 > data_end)
         return -1;
 
-    int hdrsize = nsh_hdr_len(nshh) * 4;
+    *key_nsh_base = nsh_base;
 
-    if (nh->pos + hdrsize > data_end)
-        return -1;
+    nh->pos  = nsh_base + 1;
 
-    if (nshh->mdtype == NSH_M_TYPE1 && hdrsize != NSH_M_TYPE1_LEN) {
-        return -1;
-    } else if (nshh->mdtype == NSH_M_TYPE2 && hdrsize >= NSH_BASE_HDR_LEN) {
-        return -1;
-    }
-
-    struct xf_key_nsh_base base;
-    memset(&base, 0, sizeof(struct xf_key_nsh_base));
-    base.flags = nsh_get_flags(nshh);
-    base.ttl = nsh_get_ttl(nshh);
-    base.mdtype = nshh->mdtype;
-    base.np = nshh->np;
-    base.path_hdr = nshh->path_hdr;
-
-    *key_nsh_base = &base;
-    nh->pos += NSH_BASE_HDR_LEN;
-
-    return hdrsize;
+    return 0;
 }
 
 static __always_inline int parse_xf_key_nsh_md1(struct hdr_cursor *nh,

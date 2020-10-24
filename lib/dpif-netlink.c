@@ -2682,7 +2682,6 @@ dpif_netlink_recv__(struct dpif_netlink *dpif, uint32_t handler_id,
     int read_tries = 0;
 
     if (!dpif->handlers || handler_id >= dpif->n_handlers) {
-        VLOG_INFO("-- EAGAIN --");
         return EAGAIN;
     }
 
@@ -2763,7 +2762,6 @@ static int
 dpif_netlink_recv(struct dpif *dpif_, uint32_t handler_id,
                   struct dpif_upcall *upcall, struct ofpbuf *buf)
 {
-    VLOG_INFO("---- Called: %s -- handler_id: %d ----", __func__, handler_id);
     struct dpif_netlink *dpif = dpif_netlink_cast(dpif_);
     int error;
 
@@ -2774,7 +2772,6 @@ dpif_netlink_recv(struct dpif *dpif_, uint32_t handler_id,
     error = dpif_netlink_recv__(dpif, handler_id, upcall, buf);
 #endif
     fat_rwlock_unlock(&dpif->upcall_lock);
-    VLOG_INFO("---- Edded: %s ----", __func__);
     return error;
 }
 

@@ -59,7 +59,6 @@ static __always_inline int xdp_output(struct xdp_md *ctx, __u32 ifindex)
         logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
     }
     
-    bpf_printk("xdp_output ifindex: %d\n", ifindex);
     action = bpf_redirect_map(&tx_port, ifindex, 0);
     return action;
 }
@@ -93,8 +92,6 @@ static __always_inline int xdp_normal(struct xdp_md *ctx)
     __u8 h_sourcea[ETH_ALEN];
     memcpy(h_desta, eth->h_dest, ETH_ALEN);
     memcpy(h_sourcea, eth->h_source, ETH_ALEN);
-    bpf_printk("eth->h_desta: %llx \n", ether_addr_to_u64(h_desta));
-    bpf_printk("eth->h_sourcea: %llx \n", ether_addr_to_u64(h_sourcea));
     h_proto = eth->h_proto;
     if (h_proto == bpf_htons(ETH_P_IP)) {
         iph = data + nh_off;
@@ -116,8 +113,6 @@ static __always_inline int xdp_normal(struct xdp_md *ctx)
         fib_params.ipv4_src    = iph->saddr;
         fib_params.ipv4_dst    = iph->daddr;
 
-        bpf_printk("iph->saddr: %lu \n", bpf_ntohl(iph->saddr));
-        bpf_printk("iph->daddr: %lu \n", bpf_ntohl(iph->daddr));       
     } else if (h_proto == bpf_htons(ETH_P_IPV6)) {
         struct in6_addr *src = (struct in6_addr *) fib_params.ipv6_src;
         struct in6_addr *dst = (struct in6_addr *) fib_params.ipv6_dst;
@@ -140,7 +135,6 @@ static __always_inline int xdp_normal(struct xdp_md *ctx)
         *src            = ip6h->saddr;
         *dst            = ip6h->daddr;
     } else if (h_proto == bpf_htons(ETH_P_ARP) || h_proto == bpf_htons(ETH_P_RARP)) {
-        bpf_printk("ETH_P_ARP\n");
         arph = data + nh_off;
         if (arph + 1 > data_end) {
             action = XDP_DROP;
@@ -160,11 +154,9 @@ static __always_inline int xdp_normal(struct xdp_md *ctx)
     }
 
     fib_params.ifindex = ctx->ingress_ifindex;
-    bpf_printk("ctx->ingress_ifindex: %d\n", ctx->ingress_ifindex);
     rc = bpf_fib_lookup(ctx, &fib_params, sizeof(fib_params), BPF_FIB_LOOKUP_DIRECT);
     switch (rc) {
     case BPF_FIB_LKUP_RET_SUCCESS:         /* lookup successful */
-        bpf_printk("BPF_FIB_LKUP_RET_SUCCESS\n");
         if (h_proto == bpf_htons(ETH_P_IP)) {
             // bound check to satisfy verifier
             if (iph + 1 > data_end) {
@@ -186,28 +178,13 @@ static __always_inline int xdp_normal(struct xdp_md *ctx)
         __u8 h_source[ETH_ALEN];
         memcpy(h_dest, fib_params.dmac, ETH_ALEN);
         memcpy(h_source, fib_params.smac, ETH_ALEN);
-        bpf_printk("eth->h_dest: %llx \n", ether_addr_to_u64(h_dest));
-        bpf_printk("eth->h_source: %llx \n", ether_addr_to_u64(h_source));
 
-        __u8 dmac[ETH_ALEN];
-        __u8 smac[ETH_ALEN];
-        memcpy(dmac, fib_params.dmac, ETH_ALEN);
-        memcpy(smac, fib_params.smac, ETH_ALEN);
-        bpf_printk("fib_params.dmac: %llx \n", u8_arr_to_u64(dmac, ETH_ALEN));
-        bpf_printk("fib_params.smac: %llx \n", u8_arr_to_u64(smac, ETH_ALEN));
-        bpf_printk("fib_params.ipv4_src: %lu \n", bpf_ntohl(fib_params.ipv4_src));
-        bpf_printk("fib_params.ipv4_dst: %lu \n", bpf_ntohl(fib_params.ipv4_dst));
-        bpf_printk("fib_params.ifindex: %d \n", fib_params.ifindex);
-
-        memcpy(eth->h_dest, fib_params.dmac, ETH_ALEN);
-        memcpy(eth->h_source, fib_params.smac, ETH_ALEN);
-        // action = bpf_redirect_map(&tx_port, fib_params.ifindex, 0);
-        action = bpf_redirect(fib_params.ifindex, 0);
+      
+        action = bpf_redirect_map(&tx_port, fib_params.ifindex, 0);
         break;
     case BPF_FIB_LKUP_RET_BLACKHOLE:    /* dest is blackholed; can be dropped */
     case BPF_FIB_LKUP_RET_UNREACHABLE:  /* dest is unreachable; can be dropped */
     case BPF_FIB_LKUP_RET_PROHIBIT:     /* dest not allowed; can be dropped */
-        bpf_printk("BPF_FIB_LKUP_RET_PROHIBIT\n");
         action = XDP_DROP;
         break;
     case BPF_FIB_LKUP_RET_NOT_FWDED:    /* packet is not forwarded */
@@ -215,7 +192,6 @@ static __always_inline int xdp_normal(struct xdp_md *ctx)
     case BPF_FIB_LKUP_RET_UNSUPP_LWT:   /* fwd requires encapsulation */
     case BPF_FIB_LKUP_RET_NO_NEIGH:     /* no neighbor entry for nh */
     case BPF_FIB_LKUP_RET_FRAG_NEEDED:  /* fragmentation required to fwd */
-        bpf_printk("BPF_FIB_LKUP_RET_FRAG_NEEDED %d\n", rc);
         /* PASS */
         break;
     }
@@ -553,7 +529,6 @@ static __always_inline int xdp_upcall(struct xdp_md *ctx,
     upcall.type = XDP_PACKET_CMD_MISS;
     upcall.subtype = 0;
     upcall.ifindex = ctx->ingress_ifindex;
-    bpf_printk("ctx->ingress_ifindex: %d, upcall.ifindex: %d\n", ctx->ingress_ifindex, upcall.ifindex);
     upcall.pkt_len = data_end - data;
     __builtin_memcpy(&upcall.key, key, sizeof(*key));
 
@@ -573,7 +548,6 @@ static __always_inline int xdp_upcall(struct xdp_md *ctx,
     }
 
     memcpy(up, &upcall, sizeof(upcall));
-    bpf_printk("Index %d\n", index);
     return index;  
 }
 

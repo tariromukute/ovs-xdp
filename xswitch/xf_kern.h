@@ -142,13 +142,14 @@ static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, st
     memcpy(&key->eth, eth, sizeof(key->eth));
     if (nh_type == ETH_P_IP)
     {
-        struct xf_key_ipv4 *iph;
+        struct xf_key_ipv4 iph;
+        memset(&iph, 0, sizeof(struct xf_key_ipv4));
         nh_type = parse_xf_key_iphdr(nh, data_end, &iph);
         if (nh_type < 0)
         {
             goto out;
         }
-        memcpy(&key->iph, iph, sizeof(struct xf_key_ipv4));
+        memcpy(&key->iph, &iph, sizeof(struct xf_key_ipv4));
         key->valid |= IPV4_VALID;
 
         /* Transport layer. */
@@ -161,6 +162,7 @@ static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, st
                 goto out;
             }
 
+            
             memcpy(&key->tcph, tcph, sizeof(struct xf_key_tcp));
             key->valid |= TCP_VALID;
 
@@ -175,8 +177,6 @@ static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, st
             }
 
             memcpy(&key->udph, udph, sizeof(struct xf_key_udp));
-            bpf_printk("udph->udp_src %d\n", udph->udp_src);
-            bpf_printk("key->udph.udp_src %d\n", key->udph.udp_src);
             key->valid |= UDP_VALID;
         }
         else if (nh_type == IPPROTO_SCTP)
@@ -217,20 +217,15 @@ static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, st
     }
     else if (nh_type == ETH_P_IPV6)
     {
-        struct ipv6hdr *ip6h;
-        nh_type = parse_ip6hdr(nh, data_end, &ip6h);
+        struct xf_key_ipv6 ip6h;
+        memset(&ip6h, 0, sizeof(struct xf_key_ipv6));
+        nh_type = parse_xf_key_ip6hdr(nh, data_end, &ip6h);
         if (nh_type < 0)
         {
             goto out;
         }
 
-        key->ipv6h.ipv6_proto = ip6h->nexthdr;
-        key->ipv6h.ipv6_tclass = ip6h->priority;
-        key->ipv6h.ipv6_hlimit = ip6h->hop_limit;
-        key->ipv6h.ipv6_frag = 0;
-
-        memcpy(&key->ipv6h.ipv6_src, ip6h->saddr.s6_addr32, sizeof(key->ipv6h.ipv6_src));
-        memcpy(&key->ipv6h.ipv6_dst, ip6h->daddr.s6_addr32, sizeof(key->ipv6h.ipv6_dst));
+        memcpy(&key->ipv6h, &ip6h, sizeof(struct xf_key_ipv6));
         key->valid |= IPV6_VALID;
 
         /* Transport layer. */
@@ -284,7 +279,10 @@ static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, st
             goto out;
         }
 
+
         memcpy(&key->nsh_base, nshh, sizeof(struct xf_key_nsh_base));
+        key->nsh_base.flags = nsh_get_flags((struct nshhdr *)nshh);
+        key->nsh_base.ttl = nsh_get_ttl((struct nshhdr *)nshh);
         key->valid |= NSH_BASE_VALID;
 
         if (nshh->mdtype == NSH_M_TYPE1)
@@ -317,7 +315,7 @@ out:
     return -1;
 }
 
-__u8 log_level = 0b00001111;
+__u8 log_level = LOG_ERR;
 
 /* Metadata will be in the perf event before the packet data. */
 struct S {
@@ -445,7 +443,6 @@ static __always_inline __u8 next_action(__u8 fmbuf[XDP_FLOW_METADATA_KEY_LEN_u64
     __u32 k = 0;
     actions = bpf_map_lookup_elem(&percpu_actions, &k);
     if (!actions) {
-        // bpf_printk("Could not get percpu action\n");
         return -1;
     }
 
@@ -500,13 +497,7 @@ static __always_inline void tail_action(struct xdp_md *ctx)
     if (parse_flow_metadata(&nh, data_end, fmbuf) < 0) {
         bpf_printk("flow-metadata parse failed\n");
     } else {
-        struct flow_metadata *fm = (struct flow_metadata *)fmbuf;
-        bpf_printk("flow_metadata before next_action pos %x\n", fm->pos);
-        bpf_printk("flow_metadata before next_action offset %x\n", fm->offset);
         int flow_action = next_action(fmbuf, data_end);
-        bpf_printk("flow_metadata after next_action pos %x\n", fm->pos);
-        bpf_printk("flow_metadata after next_action offset %x\n", fm->offset);
-        bpf_printk("flow_action is: %d\n", flow_action);
         if (flow_action > 0 && flow_action <= XDP_ACTION_ATTR_MAX) {
             bpf_tail_call(ctx, &tail_table, flow_action);
         }    

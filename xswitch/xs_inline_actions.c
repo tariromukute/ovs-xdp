@@ -19,25 +19,21 @@
 SEC("prog")
 int xdp_xs_inline_actions(struct xdp_md *ctx)
 {
-    bpf_printk("------------------------------------------------\n");
     int action = XDP_PASS;
-    void *data_end = (void *)(long)ctx->data_end;
-    void *data = (void *)(long)ctx->data;
-    struct hdr_cursor nh = { .pos = data };
+    // void *data_end = (void *)(long)ctx->data_end;
+    // void *data = (void *)(long)ctx->data;
+    // struct hdr_cursor nh = { .pos = data };
 
-    int err;
+    // int err;
     struct xf_key key;
     memset(&key, 0, sizeof(struct xf_key));
 
-    err = xfk_extract(&nh, data_end, &key);
-    if (err) {
-        bpf_printk("Error while extracting key\n");
-        action = XDP_DROP;
-        goto out;
-    }
+    // err = xfk_extract(&nh, data_end, &key);
+    // if (err) {
+    //     action = XDP_DROP;
+    //     goto out;
+    // }
 
-    bpf_printk("Flow key has valid: %d\n", key.valid);
-    
     // // if arp deal with it
     if (key.valid & ARP_VALID) {
         action = XDP_PASS;
@@ -46,17 +42,13 @@ int xdp_xs_inline_actions(struct xdp_md *ctx)
     struct xfa_buf *acts = bpf_map_lookup_elem(&_xf_macro_map, &key);
     if (!acts) /* If there are no flow actions, run output */
     {
-        int port_no = 0;
-        int ret = xdp_output(ctx, port_no);
+        int ret = xdp_normal(ctx);
         if (ret < 0)
             action = XDP_ABORTED;
             
-        bpf_printk("action is: %d\n", ret);
         action = ret;
         goto out;
     }
-
-    bpf_printk("Flow entry found, processing flow actions\n");
 
     /* Check that the number of actions is less that the maximum */
     __u32 num = acts->hdr.num;

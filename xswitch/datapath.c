@@ -284,8 +284,7 @@ int xdp_prog_default_load(struct xdp_ep *xdp_ep, struct xs_cfg *cfg)
     }
     pr_warn("Loading %"PRIuSIZE" files on interface '%s'.",
          num_progs, opt.iface.ifname);
-
-   
+ 
     /* libbpf spits out a lot of unhelpful error messages while loading.
      * Silence the logging so we can provide our own messages instead; this
      * is a noop if verbose logging is enabled.

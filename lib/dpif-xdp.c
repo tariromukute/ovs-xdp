@@ -93,7 +93,7 @@ VLOG_DEFINE_THIS_MODULE(dpif_xdp);
 
 /* Note: don't set to -1 else it will hold on to the upcall key 
    if timeout of 0 then there is no waiting */
-static int opt_timeout = 100;
+static int opt_timeout = 500;
 
 /* Protects against changes to 'dp_netdevs'. */
 static struct ovs_mutex dp_xdp_mutex = OVS_MUTEX_INITIALIZER;
@@ -2365,22 +2365,6 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
         return EINVAL;
     }
 
-    /* TODO: implement logic to execute actions on the packet. Might need
-       a mechanism to inject traffic on the interface specified by in_port
-       but first we will need to put in the action and the flow key on the
-       ep's flow_table_cache. Not sure if we can inject a packet on an 
-       interface but if we can then we can use this approach to handle the
-       DPIF_OP_EXECUTE operate type. The steps needed will be similar to the
-       ones below. */
-
-    // parse the actions to know which actions to apply
-
-    // get the flow key from flow
-
-    // get the port_no for the ep from flow->in_port
-
-    // insert the deatils in flow_table_cache
-
     const struct nlattr *a;
     unsigned int left;
     
@@ -2393,7 +2377,6 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
             if (bpf_ntohs(execute->flow->dl_type) == ETH_P_ARP
                 || bpf_ntohs(execute->flow->dl_type) == ETH_P_RARP) {
                 port_no = nl_attr_get_odp_port(a);
-                VLOG_INFO("--- Called: %s arp port_no %d ----", __func__, odp_to_u32(port_no));
                 struct dp_xdp_port *port_in;
                 odp_port_t in_port = execute->flow->in_port.odp_port;
                 ovs_mutex_lock(&dp->port_mutex);
@@ -2428,14 +2411,6 @@ dpif_xdp_execute(struct dpif *dpif, struct dpif_execute *execute)
             struct dp_packet_batch batch;
             struct dp_packet *clone_pkt = dp_packet_clone(execute->packet);
             dp_packet_batch_init_packet(&batch, clone_pkt);
-
-            struct flow flow;
-            flow_extract(clone_pkt, &flow);
-
-            struct ds ds = DS_EMPTY_INITIALIZER;
-            flow_format(&ds, &flow, NULL);
-            VLOG_INFO("--- Called: %s out_port %d, flow %s ---", __func__, odp_to_u32(port->port_no), ds_cstr(&ds));
-            ds_destroy(&ds);
 
             // tx_only(dp->channels[odp_to_u32(port_no)].sock, clone_pkt);
             error = netdev_send(port->netdev, queue, &batch, false);

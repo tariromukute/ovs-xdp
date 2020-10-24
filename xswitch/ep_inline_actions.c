@@ -19,7 +19,6 @@
 SEC("prog")
 int xdp_ep_inline_actions(struct xdp_md *ctx)
 {
-    bpf_printk("------------------------------------------------\n");
     int action = XDP_PASS;
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
@@ -31,30 +30,13 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
 
     err = xfk_extract(&nh, data_end, &key);
     if (err) {
-        bpf_printk("Error while extracting key\n");
         action = XDP_DROP;
         goto out;
     }
 
-    bpf_printk("Flow key has valid: %d\n", key.valid);
-    
-    // // if arp deal with it
-    // if (key.valid & ARP_VALID) {
-    //     bpf_printk("Flow key is arp\n");
-    //     __u32 port_no = 2 ;
-    //     int ret = xdp_output(ctx, port_no);
-    //     if (ret < 0)
-    //         action = XDP_ABORTED;
-            
-    //     bpf_printk("action is: %d\n", ret);
-    //     action = ret;
-    //     // action = XDP_PASS;
-    //     goto out; // output should be the last action where included
-    // }
     struct xfa_buf *acts = bpf_map_lookup_elem(&_xf_macro_map, &key);
     if (!acts || key.valid & ARP_VALID) /* If there are no flow actions, make an upcall */
     {
-        bpf_printk("Flow entry not found, doing upcall\n");
         int index = xdp_upcall(ctx, &key);
         if (index < 0) {
             goto out;
@@ -73,7 +55,6 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
 
         goto out;
     }
-    bpf_printk("Flow entry found, processing flow actions\n");
 
     /* Check that the number of actions is less that the maximum */
     __u32 num = acts->hdr.num;
@@ -90,7 +71,6 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
      * run for XFA_BUF_MAX_NUM and it will terminate when all the actions have been found. */
     int index = 0;    
     for(index = 0; index < XFA_BUF_MAX_NUM; index++) {
-        bpf_printk("Processing actions, loop num: %d cursor cnt %d, cursor total actions: %d", index, cursor.cnt, acts->hdr.num);
         struct xf_act a;
         memset(&a, 0, sizeof(struct xf_act));
         int ret = xfa_next_data(acts, &cursor, &a);
@@ -101,7 +81,6 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         } else if (ret == 0) {
             break;            
         }
-        bpf_printk("Processing action type: %d\n", a.hdr.type);
         switch(a.hdr.type) {
             case XDP_ACTION_ATTR_UNSPEC: {
                 ret = xdp_unspec(ctx);
@@ -260,7 +239,6 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
     } 
 
 out:
-    bpf_printk("xdp_inline_actions exiting with action %d\n", action);
     return action;
 }
 
