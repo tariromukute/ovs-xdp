@@ -5,6 +5,7 @@
 #include "datapath.h"
 #include "flow.h"
 #include "xdp_user_helpers.h"
+#include "dynamic-string.h"
 
 #include <netinet/ether.h>
 #include <sys/socket.h>
@@ -123,7 +124,7 @@ int list_flow_cmd(int argc, char **argv, void *params)
     char *description = "Prints out the logs from the datapath. It can print all logs\n\
                         or filter by log level: debug, error, info.";
     char *use = "xdp-ctl flows list [flags]";
-    int MAX_FLOWS = 10;
+    int MAX_FLOWS = MAX_MACRO_FLOWS;
     int error = 0;
     struct flow_arguments args;
     memset(&args, 0, sizeof(struct flow_arguments));
@@ -131,11 +132,12 @@ int list_flow_cmd(int argc, char **argv, void *params)
     if (error)
         goto out;
 
-    struct xdp_flow *flow = NULL;
-    struct xdp_flow_key key;
-    struct xdp_flow *list_flow;
-    list_flow = malloc(MAX_FLOWS * sizeof(struct xdp_flow));
+    struct xf *xf = NULL;
+    struct xf_key xf_key;
+    struct xf *list_xf;
+    list_xf = malloc(MAX_FLOWS * sizeof(struct xf));
     int cnt = 0;
+
     if (strcmp(args.dp_name, ""))
     {
         struct xdp_datapath dp = {
@@ -143,11 +145,12 @@ int list_flow_cmd(int argc, char **argv, void *params)
         };
         while (!error && cnt < MAX_FLOWS)
         {
-            error = xdp_dp_flow_next(&dp, &key, &flow);
+            // error = xdp_dp_flow_next(&dp, &key, &flow);
+            error = xswitch_br__flow_next(dp.name, &xf_key, &xf);
             if (!error)
             {
-                memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
-                memcpy(&list_flow[cnt], flow, sizeof(struct xdp_flow));
+                memcpy(&xf_key, &xf->key, sizeof(struct xf_key));
+                memcpy(&list_xf[cnt], xf, sizeof(struct xf));
                 cnt++;
             }
             else
@@ -158,28 +161,28 @@ int list_flow_cmd(int argc, char **argv, void *params)
     }
     else if (strcmp(args.if_name, ""))
     {
-        int if_index = -1;
-        if_index = if_nametoindex(args.if_name);
-        if (if_index < 0)
-        {
-            error = ENONET;
-            goto out;
-        }
+        // int if_index = -1;
+        // if_index = if_nametoindex(args.if_name);
+        // if (if_index < 0)
+        // {
+        //     error = ENONET;
+        //     goto out;
+        // }
 
-        while (!error && cnt < MAX_FLOWS)
-        {
-            error = xdp_if_flow_next(if_index, &key, &flow);
-            if (!error)
-            {
-                memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
-                memcpy(&list_flow[cnt], flow, sizeof(struct xdp_flow));
-                cnt++;
-            }
-            else
-            {
-                goto print;
-            }
-        }
+        // while (!error && cnt < MAX_FLOWS)
+        // {
+        //     error = xdp_if_flow_next(if_index, &key, &flow);
+        //     if (!error)
+        //     {
+        //         memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
+        //         memcpy(&list_flow[cnt], flow, sizeof(struct xdp_flow));
+        //         cnt++;
+        //     }
+        //     else
+        //     {
+        //         goto print;
+        //     }
+        // }
     } else {
         /* TODO: implement default action for list flows. Either iterate all datapaths */
         printf("Provide either datapath name (--dp <datapath_name>) or interface name (--ifname <if_name>)\n");
@@ -194,18 +197,115 @@ print:
     }
     for (size_t i = 0; i < cnt; i++)
     {
-        char buf[4096];        
-        error = format_xdp_key(&list_flow[i].key, buf);
-        if (error)
+        char buf[4096];
+        struct ds ds = DS_EMPTY_INITIALIZER;       
+        xdp_flow_key_format(&ds, &list_xf[i].key);
+        xfa_buf_format(&ds, &list_xf[i].actions);
+        printf("%s\n", ds_cstr(&ds));
+        ds_destroy(&ds);
+        // error = format_xdp_actions(&list_xf[i].actions);
+        // if (error)
+        // {
+        //     goto out;
+        // }
+    }
+
+out:
+    if (error == EINVAL) {
+        print_cmd_usage(description, use, NULL, list_flows_options);
+    }
+    return error;
+}
+
+int list_upcall_cmd(int argc, char **argv, void *params)
+{
+    char *description = "Prints out the logs from the datapath. It can print all logs\n\
+                        or filter by log level: debug, error, info.";
+    char *use = "xdp-ctl flows list-upcall [flags]";
+    int MAX_FLOWS = MAX_MACRO_FLOWS;
+    int error = 0;
+    struct flow_arguments args;
+    memset(&args, 0, sizeof(struct flow_arguments));
+    error = parse_list_flows_options(argc, argv, &args);
+    if (error)
+        goto out;
+
+    struct xfu_buf *xfu_buf = NULL;
+    struct xf_key xf_key;
+    struct xfu_buf *list_xfu;
+    list_xfu = malloc(MAX_FLOWS * sizeof(struct xfu_buf));
+    int cnt = 0;
+
+    if (strcmp(args.dp_name, ""))
+    {
+        struct xdp_datapath dp = {
+            .name = args.dp_name
+        };
+        while (!error && cnt < MAX_FLOWS)
         {
-            goto out;
+            // error = xdp_dp_flow_next(&dp, &key, &flow);
+            error = xswitch_br__upcall_next(dp.name, &xf_key, &xfu_buf);
+            if (!error)
+            {
+                memcpy(&xf_key, &xfu_buf->key, sizeof(struct xf_key));
+                memcpy(&list_xfu[cnt], xfu_buf, sizeof(struct xfu_buf));
+                cnt++;
+            }
+            else
+            {
+                goto print;
+            }
         }
-        printf("%s\n", buf);
-        error = format_xdp_actions(&list_flow[i].actions);
-        if (error)
-        {
-            goto out;
-        }
+    }
+    else if (strcmp(args.if_name, ""))
+    {
+        // int if_index = -1;
+        // if_index = if_nametoindex(args.if_name);
+        // if (if_index < 0)
+        // {
+        //     error = ENONET;
+        //     goto out;
+        // }
+
+        // while (!error && cnt < MAX_FLOWS)
+        // {
+        //     error = xdp_if_flow_next(if_index, &key, &flow);
+        //     if (!error)
+        //     {
+        //         memcpy(&key, &flow->key, sizeof(struct xdp_flow_key));
+        //         memcpy(&list_flow[cnt], flow, sizeof(struct xdp_flow));
+        //         cnt++;
+        //     }
+        //     else
+        //     {
+        //         goto print;
+        //     }
+        // }
+    } else {
+        /* TODO: implement default action for list flows. Either iterate all datapaths */
+        printf("Provide either datapath name (--dp <datapath_name>) or interface name (--ifname <if_name>)\n");
+        goto out;
+    }
+
+print:
+    if (cnt == 0)
+    {
+        printf("No flows found\n");
+        goto out;
+    }
+    for (size_t i = 0; i < cnt; i++)
+    {
+        char buf[4096];
+        struct ds ds = DS_EMPTY_INITIALIZER;       
+        xdp_flow_key_format(&ds, &list_xfu[i].key);
+        xfu_stats_format(&ds, &list_xfu[i].stats);
+        printf("%s\n", ds_cstr(&ds));
+        ds_destroy(&ds);
+        // error = format_xdp_actions(&list_xf[i].actions);
+        // if (error)
+        // {
+        //     goto out;
+        // }
     }
 
 out:

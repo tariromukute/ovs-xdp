@@ -34,7 +34,21 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         goto out;
     }
 
+    /* log the key of the received flow on debug level */
+    if (log_level & LOG_DEBUG) {
+        logger(ctx, LOG_XF_KEY, &key, sizeof(struct xf_key));
+    }
+
     struct xfa_buf *acts = bpf_map_lookup_elem(&_xf_macro_map, &key);
+    // if (!acts) {
+    //     acts = bpf_map_lookup_elem(&_xf_macro_map, &key);
+    //     if (acts) {
+    //         bpf_map_update_elem(&xf_micro_map, &key, acts, 0);
+    //         // Get a reference to the micro_map record
+    //         acts = bpf_map_lookup_elem(&xf_micro_map, &key);
+    //     }
+    // }
+    
     if (!acts || key.valid & ARP_VALID) /* If there are no flow actions, make an upcall */
     {
         int index = xdp_upcall(ctx, &key);
@@ -52,9 +66,11 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         //  * helper function why this is, it maybe due to some 'enforced' logic that can be changed */
         if (bpf_map_lookup_elem(&xsks_map, &index))
             return bpf_redirect_map(&xsks_map, index, 0);
-
         goto out;
     }
+
+    /* Record stats */
+    xfa_record_stats(ctx, acts);
 
     /* Check that the number of actions is less that the maximum */
     __u32 num = acts->hdr.num;
@@ -81,6 +97,7 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         } else if (ret == 0) {
             break;            
         }
+
         switch(a.hdr.type) {
             case XDP_ACTION_ATTR_UNSPEC: {
                 ret = xdp_unspec(ctx);
@@ -231,8 +248,8 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
         // One of the actions failed, otherwise the program work execute here
         if (action == XDP_ABORTED) {
             if (log_level & LOG_ERR) {
-                char msg[LOG_MSG_SIZE] = "Error occured whilst applying actions to packet";
-                logger(ctx, LOG_ERR, msg, LOG_MSG_SIZE);
+                // char msg[LOG_MSG_SIZE] = "Error occured whilst applying actions to packet";
+                // logger(ctx, LOG_ERR, msg, LOG_MSG_SIZE);
             }
             break;
         }

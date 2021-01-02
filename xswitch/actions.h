@@ -203,10 +203,10 @@ out:
 static __always_inline int xdp_userspace(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_userspace action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_userspace action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -214,10 +214,10 @@ static __always_inline int xdp_userspace(struct xdp_md *ctx, void *action, __u32
 static __always_inline int xdp_set(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_set action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_set action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -226,10 +226,10 @@ static __always_inline int xdp_set(struct xdp_md *ctx, void *action, __u32 size)
 static __always_inline int xdp_push_vlan(struct xdp_md *ctx, 
                     struct xdp_action_push_vlan *action)
 {
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_push_vlan action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_push_vlan action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
@@ -276,10 +276,10 @@ static __always_inline int xdp_push_vlan(struct xdp_md *ctx,
 
 static __always_inline int xdp_pop_vlan(struct xdp_md *ctx)
 {
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_vlan action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_pop_vlan action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
@@ -328,10 +328,10 @@ static __always_inline int xdp_pop_vlan(struct xdp_md *ctx)
 static __always_inline int xdp_sample(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_sample action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_sample action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -339,10 +339,10 @@ static __always_inline int xdp_sample(struct xdp_md *ctx, void *action, __u32 si
 static __always_inline int xdp_recirc(struct xdp_md *ctx, __u32 action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_recirc action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_recirc action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -351,10 +351,10 @@ static __always_inline int xdp_hash(struct xdp_md *ctx,
                     struct xdp_action_hash *action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_hash action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_hash action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -363,10 +363,10 @@ static __always_inline int xdp_push_mpls(struct xdp_md *ctx,
                     struct xdp_action_push_mpls *action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_push_mpls action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_push_mpls action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -374,10 +374,10 @@ static __always_inline int xdp_push_mpls(struct xdp_md *ctx,
 static __always_inline int xdp_pop_mpls(struct xdp_md *ctx, __be16 action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_mpls action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_pop_mpls action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -385,10 +385,10 @@ static __always_inline int xdp_pop_mpls(struct xdp_md *ctx, __be16 action)
 static __always_inline int xdp_set_masked(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_set_masked action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_set_masked action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -396,10 +396,10 @@ static __always_inline int xdp_set_masked(struct xdp_md *ctx, void *action, __u3
 static __always_inline int xdp_ct(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_ct action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_ct action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -408,10 +408,10 @@ static __always_inline int xdp_trunc(struct xdp_md *ctx,
                     struct xdp_action_trunc *action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_trunc action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_trunc action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }                    
@@ -420,10 +420,10 @@ static __always_inline int xdp_push_eth(struct xdp_md *ctx,
                     struct xdp_action_push_eth *action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_push_eth action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_push_eth action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;   
 }
@@ -431,10 +431,10 @@ static __always_inline int xdp_push_eth(struct xdp_md *ctx,
 static __always_inline int xdp_pop_eth(struct xdp_md *ctx)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_eth action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_pop_eth action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -442,10 +442,10 @@ static __always_inline int xdp_pop_eth(struct xdp_md *ctx)
 static __always_inline int xdp_ct_clear(struct xdp_md *ctx)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_ct_clear action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_ct_clear action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -453,10 +453,10 @@ static __always_inline int xdp_ct_clear(struct xdp_md *ctx)
 static __always_inline int xdp_push_nsh(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_push_nsh action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_push_nsh action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -464,10 +464,10 @@ static __always_inline int xdp_push_nsh(struct xdp_md *ctx, void *action, __u32 
 static __always_inline int xdp_pop_nsh(struct xdp_md *ctx)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_pop_nsh action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_pop_nsh action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -475,10 +475,10 @@ static __always_inline int xdp_pop_nsh(struct xdp_md *ctx)
 static __always_inline int xdp_meter(struct xdp_md *ctx, __u32 action)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_meter action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_meter action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -486,10 +486,10 @@ static __always_inline int xdp_meter(struct xdp_md *ctx, __u32 action)
 static __always_inline int xdp_clone(struct xdp_md *ctx, void *action, __u32 size)
 {
     int err = 0;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_clone action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_clone action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return err;
 }
@@ -497,10 +497,10 @@ static __always_inline int xdp_clone(struct xdp_md *ctx, void *action, __u32 siz
 static __always_inline int xdp_drop(struct xdp_md *ctx)
 {
     int action = XDP_PASS;
-    if (log_level & LOG_DEBUG) {
-        char msg[LOG_MSG_SIZE] = "Executing xdp_drop action";
-        logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
-    }
+    // if (log_level & LOG_DEBUG) {
+    //     char msg[LOG_MSG_SIZE] = "Executing xdp_drop action";
+    //     logger(ctx, LOG_DEBUG, msg, LOG_MSG_SIZE);
+    // }
 
     return action;
 }
@@ -521,6 +521,24 @@ static __always_inline int xdp_upcall(struct xdp_md *ctx,
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
     int index = ctx->ingress_ifindex;
+
+    /* Record upcall stats */
+    struct xfu_stats *stats = bpf_map_lookup_elem(&_xf_stats_map, key);
+    if (stats) {
+         /* Calculate packet length */
+        __u64 bytes = data_end - data;
+
+        /* BPF_MAP_TYPE_PERCPU_ARRAY returns a data record specific to current
+        * CPU and XDP hooks runs under Softirq, which makes it safe to update
+        * without atomic operations.
+        */
+        stats->rx_packets++;
+        stats->rx_bytes += bytes;
+    } else {
+        struct xfu_stats s;
+        memset(&s, 0, sizeof(struct xfu_stats));
+        bpf_map_update_elem(&_xf_stats_map, key, &s, 0);
+    }
 
     /* Add upcall information at the head of the packet */
     struct xf_upcall *up = data;

@@ -32,6 +32,13 @@
                          ##__VA_ARGS__);                        \
 })
 
+/* LLVM maps __sync_fetch_and_add() as a built-in function to the BPF atomic add
+ * instruction (that is BPF_STX | BPF_XADD | BPF_W for word sizes)
+ */
+#ifndef lock_xadd
+#define lock_xadd(ptr, val)	((void) __sync_fetch_and_add(ptr, val))
+#endif
+
 #ifndef memcpy
 #define memcpy(dest, src, n) __builtin_memcpy((dest), (src), (n))
 #endif
@@ -46,10 +53,10 @@
 
 /* map #0 */
 struct micro_flow_map {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
     __uint(key_size, sizeof(struct xf_key));
     __uint(value_size, sizeof(struct xfa_buf));
-    __uint(max_entries, 100);
+    __uint(max_entries, 10);
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xf_micro_map SEC(".maps");
 
@@ -66,7 +73,7 @@ struct macro_flow_map {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(key_size, sizeof(struct xf_key));
     __uint(value_size, sizeof(struct xfa_buf));
-    __uint(max_entries, 100);
+    __uint(max_entries, 10);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } _xf_macro_map SEC(".maps");
 
@@ -94,7 +101,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_XSKMAP);
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(int));
-    __uint(max_entries, 128);
+    __uint(max_entries, 12);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xsks_map SEC(".maps");
 
@@ -110,7 +117,7 @@ struct {
 /* map #4 */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
-    __uint(max_entries, 64);
+    __uint(max_entries, 12);
     __uint(key_size, IFNAMSIZ);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
     __array(values, struct micro_flow_map);
@@ -124,9 +131,33 @@ struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(int));
-    __uint(max_entries, 128);
+    __uint(max_entries, 12);
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } tx_port SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(key_size, sizeof(struct xf_key));
+    __uint(value_size, sizeof(struct xfu_stats));
+    __uint(max_entries, 10);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} _xf_stats_map SEC(".maps");
+
+static __always_inline void xfa_record_stats(struct xdp_md *ctx, struct xfa_buf *acts)
+{
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data     = (void *)(long)ctx->data;
+
+    /* Calculate packet length */
+    __u64 bytes = data_end - data;
+
+    /* BPF_MAP_TYPE_PERCPU_ARRAY returns a data record specific to current
+     * CPU and XDP hooks runs under Softirq, which makes it safe to update
+     * without atomic operations.
+     */
+    acts->stats.rx_packets++;
+    acts->stats.rx_bytes += bytes;
+}
 
 static __always_inline int xfk_extract(struct hdr_cursor *nh, void *data_end, struct xf_key *key)
 {
@@ -315,7 +346,7 @@ out:
     return -1;
 }
 
-__u8 log_level = LOG_ERR;
+__u8 log_level = LOG_DEBUG;
 
 /* Metadata will be in the perf event before the packet data. */
 struct S {
@@ -364,14 +395,12 @@ static __always_inline int logger(struct xdp_md *ctx, __u16 log_type,
 
         int ret = bpf_perf_event_output(ctx, &_perf_map, flags,
                         &log, sizeof(struct S));
-        if (ret) {
-            bpf_printk("Error: perf_event_output failed: %d\n", ret);
-        }
-    } else {
-        bpf_printk("Error: Could not log data");
+        if (!ret)
+            return 0;
     }
-
-    return 0;
+    
+    bpf_printk("xf loader failed\n");
+    return -1;
 }
 
 #define SAMPLE_SIZE 64ul
@@ -398,22 +427,6 @@ struct bpf_map_def SEC("maps") percpu_actions = {
     .key_size = sizeof(__u32),
     .value_size = XDP_FLOW_ACTIONS_LEN_u64,
     .max_entries = 1,
-};
-
-/* map #3 */
-struct bpf_map_def SEC("maps") flow_table = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = XDP_FLOW_KEY_LEN_u64,
-    .value_size = XDP_FLOW_ACTIONS_LEN_u64,
-    .max_entries = 100,
-};
-
-/* map #4 */
-struct bpf_map_def SEC("maps") flow_stats_table = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = XDP_FLOW_KEY_LEN_u64,
-    .value_size = XDP_FLOW_STATS_LEN_u64,
-    .max_entries = 100,
 };
 
 static __always_inline int parse_flow_metadata(struct hdr_cursor *nh,

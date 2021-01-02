@@ -47,6 +47,7 @@
 
 static const char *pin_basedir = "/sys/fs/bpf";
 static const char *stats_map = "stats_map";
+static const char *xf_stats_map = "_xf_stats_map";
 static const char *flow_map = "xf_micro_map";
 static const char *macro_flow_map = "_xf_macro_map";
 static const char *tx_port = "tx_port";
@@ -351,6 +352,9 @@ xswitch_br__flow_remove(char *brname, struct xf_key *key);
 
 int
 xswitch_br__flow_flush(char *brname);
+
+int
+xswitch_br__upcall_next(char *brname, struct xf_key *pkey, struct xfu_buf **upp);
 
 /* management of bridge */
 // int

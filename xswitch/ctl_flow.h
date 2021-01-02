@@ -8,11 +8,13 @@
 int flow_cmd(int argc, char **argv, void *params);
 
 int list_flow_cmd(int argc, char **argv, void *params);
+int list_upcall_cmd(int argc, char **argv, void *params);
 int add_flow_cmd(int argc, char **argv, void *params);
 int edit_flow_cmd(int argc, char **argv, void *params);
 
 static const struct command flow_cmds[] = {
     {"list", "list [flags]", list_flow_cmd},
+    {"list-upcall", "list-upcall [flags]", list_upcall_cmd},
     {"add", "add <flow> [flags]", add_flow_cmd},
     {"edit", "edit <flow> [flags]", edit_flow_cmd},
     {0, 0, 0}};

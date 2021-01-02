@@ -322,7 +322,6 @@ XDP_TARGETS = \
 	xswitch/ep_tail_actions \
 	xswitch/ep_pass_action \
 	xswitch/ep_router_actions \
-	xswitch/entry-point \
 	xswitch/xdp-dispatcher
 
 LLC ?= llc
@@ -374,7 +373,6 @@ dist_xswitch_DATA += \
 	xswitch/ep_tail_actions.o \
 	xswitch/ep_pass_action.o \
 	xswitch/ep_router_actions.o \
-	xswitch/entry-point.o \
 	xswitch/xdp-dispatcher.o
 
 CLEANFILES += \
@@ -384,7 +382,6 @@ CLEANFILES += \
 	xswitch/ep_tail_actions.ll \
 	xswitch/ep_pass_action.ll \
 	xswitch/ep_router_actions.ll \
-	xswitch/entry-point.ll \
 	xswitch/xdp-dispatcher.c \
 	xswitch/xdp-loader \
 	xswitch/stamp-h2

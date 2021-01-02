@@ -13,6 +13,10 @@
 #include <stdbool.h>
 #include <bpf/bpf_endian.h>
 
+/* declare maximum number of flows in maps */
+#define MAX_MACRO_FLOWS 250
+#define MAX_MICRO_FLOWS 100
+
 /* Adding the new xf structs and functions */
 #define XFA_MAX_SIZE 24 /* 128 bits */
 #define XFA_BUF_MAX_NUM 4
@@ -511,6 +515,11 @@ struct xfa_hdr {
     __u32 num;
 };
 
+struct xfa_stats {
+    __u64 rx_packets;
+    __u64 rx_bytes;
+};
+
 struct xfa_cur {
     __u32 cnt;
     __u32 offset;
@@ -519,6 +528,7 @@ struct xfa_cur {
 /* xdp flow actions buffer for storing the list of action for a given flow */
 struct xfa_buf {
     struct xfa_hdr hdr;
+    struct xfa_stats stats;
     __u8 data[XFA_BUF_MAX_SIZE];
 };
 
@@ -529,6 +539,16 @@ struct xf_upcall {
     __u32 pkt_len;
     struct xf_key key;  
     /* Follwed by pkt_len of packet data */
+};
+
+struct xfu_stats {
+    __u64 rx_packets;
+    __u64 rx_bytes;
+};
+
+struct xfu_buf {
+    struct xf_key key;
+    struct xfu_stats stats;
 };
 
 struct xf {

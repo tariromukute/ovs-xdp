@@ -5,6 +5,7 @@
 #include "err.h"
 #include "util.h"
 #include "logging.h"
+#include "xdp_user_helpers.h"
 #include "dynamic-string.h"
 
 #pragma GCC diagnostic push
@@ -110,7 +111,11 @@ int xf_map_lookup(int map_fd, const struct xf_key *xf_key, struct xfa_buf *xfas)
 
     error = bpf_map_lookup_elem(map_fd, xf_key, xfas);
     if (error) {
+        struct ds ds = DS_EMPTY_INITIALIZER;
+        xdp_flow_key_format(&ds, xf_key);
         pr_warn("Error looking up actions");
+        pr_warn("key is %s", ds_cstr(&ds));
+        ds_destroy(&ds);
     }
 
     return error;

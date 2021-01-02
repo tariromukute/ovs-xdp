@@ -33,6 +33,8 @@
 
 void format_key_to_hex(struct ds *ds, struct xdp_flow_key *key);
 void xdp_flow_key_format(struct ds *ds, struct xf_key *key);
+void xfa_buf_format(struct ds *ds, struct xfa_buf *act);
+void xfu_stats_format(struct ds *ds, struct xfu_stats *stats);
 int format_xdp_actions(const struct xdp_flow_actions *acts);
 int format_xdp_key(struct xdp_flow_key *key, char buf[]);
 
@@ -379,6 +381,20 @@ void xdp_flow_key_format(struct ds *ds, struct xf_key *key)
         }
     }
 
+}
+
+void xfa_buf_format(struct ds *ds, struct xfa_buf *act)
+{
+    ds_put_format(ds, "rx_packets=(%d), rx_bytes=(%d)",
+                    act->stats.rx_packets,
+                    act->stats.rx_bytes);
+}
+
+void xfu_stats_format(struct ds *ds, struct xfu_stats *stats)
+{
+    ds_put_format(ds, "rx_packets=(%d), rx_bytes=(%d)",
+                    stats->rx_packets,
+                    stats->rx_bytes);
 }
 
 int format_xdp_key(struct xdp_flow_key *key, char buf[])

@@ -342,7 +342,6 @@ retry:
         progs[i] = p;
     }
 
-
     err = xdp_program__attach_multi(progs, num_progs,
                     opt.iface.ifindex, opt.mode, 0);
 
@@ -1216,7 +1215,10 @@ xswitch_br__flow_insert(char *brname, struct xf *flow)
         /* TODO: check error and return code */
         goto out;
     }
-
+    struct ds ds = DS_EMPTY_INITIALIZER;
+    xdp_flow_key_format(&ds, xf_key);
+    pr_warn("Successfully updated key %s", ds_cstr(&ds));
+    ds_destroy(&ds);
 out:
     if (map_fd >= 0)
         close(map_fd);
@@ -1333,6 +1335,55 @@ out:
     return err;
 }
 
+int
+xswitch_br__upcall_next(char *brname, struct xf_key *pkey, struct xfu_buf **upp)
+{
+    struct xfu_buf xfu_buf;
+    memset(&xfu_buf, 0, sizeof(struct xfu_buf));
+
+    struct xf_key xf_key;
+    memset(&xf_key, 0, sizeof(struct xf_key));
+    
+    if (pkey)
+        memcpy(&xf_key, pkey, sizeof(*pkey));
+    int err = 0;
+
+    char pin_path[PATH_MAX];
+    if (try_snprintf(pin_path, PATH_MAX, "%s/%s/%s", pin_basedir, brname, xf_stats_map)) {
+        pr_warn("Could not create pin_path");
+        return EXIT_FAILURE;
+    }
+    
+    int map_fd = bpf_obj_get(pin_path);
+    if (map_fd < 0) {
+        pr_warn("Could not find map pin path: %s, %d", pin_path, map_fd);
+    }
+
+    struct xf_key nxf_key;
+    memset(&nxf_key, 0, sizeof(struct xf_key));
+    err = xf_map_next_key(map_fd, &xf_key, &nxf_key);
+    if (err) {
+        /* TODO: check error and return code */
+        goto out;
+    }
+
+    memcpy(&xfu_buf.key, &nxf_key, sizeof(struct xf_key));
+
+    struct xfu_stats stats_buf;
+    memset(&stats_buf, 0, sizeof(struct xfu_stats));
+    err = xf_map_lookup(map_fd, &nxf_key, &stats_buf);
+    if (err) {
+        /* TODO: check error and return code */
+        goto out;
+    }
+    memcpy(&xfu_buf.stats, &stats_buf, sizeof(struct xfu_stats));
+    *upp = &xfu_buf;
+
+out:
+    if (map_fd >= 0)
+        close(map_fd);
+    return err;
+}
 
 /* entry point flow stats */
 int
