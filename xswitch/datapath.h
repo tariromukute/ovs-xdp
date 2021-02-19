@@ -294,6 +294,20 @@ xswitch_xsk__create_umem(struct xsk_umem_info **umem);
 int
 xswitch_xsk__create_umem__v2(struct xsk_umem_info **umem);
 
+// creates umem
+struct xsk_socket_info *
+xswitch_xsk__configure(const char *brname, int ifindex, int queue_id, enum xdp_attach_mode mode);
+
+int
+xswitch_xsk__configure_queue(struct xsk_socket_info **xsks, const char *brname, int queue_id, 
+                                int ifindex, enum xdp_attach_mode mode);
+
+int
+xswitch_xsk__configure_all(struct xsk_socket_info **sockp, struct xs_cfg *cfg, int n_rxq);
+
+int
+xswitch_xsk__shared_configure_all(struct xsk_socket_info **xsks, struct xsk_umem_info *umem, struct xs_cfg *cfg, int n_rxq);
+
 int
 xdp_xsk_create(struct xsk_socket_info **sockp, struct xs_cfg *cfg, struct xsk_umem_info *umem);
 
@@ -369,6 +383,10 @@ xswitch_br__upcall_next(char *brname, struct xf_key *pkey, struct xfu_buf **upp)
 // int
 // xswitch_br__remove_port(const char *brname, const char *ifname);
 
+/* interface management */
+int
+xswitch_net__n_rxq(const char *);
+
 /* arp table */
 int
 xswitch_arp__add_entry(char *dev, __be32 ip, __u8 mac[ETH_ALEN]);
@@ -434,7 +452,6 @@ xdp_dp_flow_stats_next(int map_fd, struct xdp_flow_key *key, struct xdp_flow *fl
 
 int
 xdp_dp_flow_stats_flush(int map_fd);
-
 
 
 #endif /* xdp_datapath.h */

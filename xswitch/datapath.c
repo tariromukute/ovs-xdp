@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <fcntl.h>
+#include <stdlib.h>
 // #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
@@ -14,6 +15,7 @@
 #include "datapath.h"
 #include "flow-table.h"
 #include "dynamic-string.h"
+#include "net_utils.h"
 
 // static const char *action_filename = "actions.o";
 
@@ -617,13 +619,111 @@ static struct xsk_umem_info *xsk_configure_umem__v2(void *buffer, __u64 size)
     return umem;
 }
 
+static int xsk__lookup_xsks_fd(int prog_fd)
+{
+    __u32 i, *map_ids, num_maps, prog_len = sizeof(struct bpf_prog_info);
+    __u32 map_len = sizeof(struct bpf_map_info);
+    struct bpf_prog_info prog_info = {};
+    struct bpf_map_info map_info;
+    int fd, err, xsks_map_fd;
+
+    err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+    if (err) {
+        pr_warn("Failed to get bpf_obj");
+        return err;
+    }
+
+    num_maps = prog_info.nr_map_ids;
+
+    map_ids = calloc(prog_info.nr_map_ids, sizeof(*map_ids));
+    if (!map_ids) {
+        pr_warn("Failed to allocate mem for map_ids");
+        return -ENOMEM;
+    }
+
+    memset(&prog_info, 0, prog_len);
+    prog_info.nr_map_ids = num_maps;
+    prog_info.map_ids = (__u64)(unsigned long)map_ids;
+
+    err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+    if (err) {
+        pr_warn("Failed to get bpf_obj after creating map_ids");
+        goto out_map_ids;
+    }
+
+    xsks_map_fd = -1;
+
+    for (i = 0; i < prog_info.nr_map_ids; i++) {
+        fd = bpf_map_get_fd_by_id(map_ids[i]);
+        if (fd < 0)
+            continue;
+
+        err = bpf_obj_get_info_by_fd(fd, &map_info, &map_len);
+        if (err) {
+            close(fd);
+            continue;
+        }
+
+        pr_warn("map_info.name %s", map_info.name);
+        if (!strcmp(map_info.name, "xsks_map")) {
+            xsks_map_fd = fd;
+            continue;
+        }
+
+        close(fd);
+    }
+
+    err = 0;
+    if (xsks_map_fd >= 0)
+        return xsks_map_fd;
+
+    pr_warn("Could not find xsks_map xsks_map_fd %d", xsks_map_fd);
+    err = -ENOENT;
+
+out_map_ids:
+    free(map_ids);
+    return err;
+}
+
+/* Gets the xsks_map when multiple programs are loaded. This methods
+   terminates after getting the first xsks_map therefore assumes either:
+   (i) All the programs loaded use the same xsks_map
+   (ii) Only one program on an interface can use a xsks_map
+   */
+static int xsk__multiprog_lookup_xsks_fd(int ifindex)
+{
+    struct xdp_multiprog *mp;
+    struct xdp_program *prog, *dispatcher;
+    int prog_fd, xsks_map_fd;
+
+    mp = xdp_multiprog__get_from_ifindex(ifindex);
+
+    dispatcher = xdp_multiprog__main_prog(mp);
+
+    for (prog = xdp_multiprog__next_prog(NULL, mp);
+         prog;
+         prog = xdp_multiprog__next_prog(prog, mp)) {
+
+        prog_fd = xdp_program__fd(prog);
+        if (prog_fd < 0)
+            continue;
+
+        xsks_map_fd = xsk__lookup_xsks_fd(prog_fd);
+        if (xsks_map_fd >= 0)
+            break;
+    }
+
+    return xsks_map_fd;
+}
+
 static struct xsk_socket_info *xsk_configure_socket(struct xs_cfg *cfg,
                             struct xsk_umem_info *umem)
 {
+    
     struct xsk_socket_config xsk_cfg;
     struct xsk_socket_info *xsk_info;
     uint32_t idx;
-    // uint32_t prog_id = 0;
+    uint32_t prog_id = 0;
     int i;
     int ret;
 
@@ -634,14 +734,13 @@ static struct xsk_socket_info *xsk_configure_socket(struct xs_cfg *cfg,
     }
 
     xsk_info = calloc(1, sizeof(*xsk_info));
-    if (!xsk_info) {
-        pr_warn("Couldn't calloc xsk_info");
+    if (!xsk_info)
         return NULL;
-    }
 
     xsk_info->umem = umem;
     xsk_cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
     xsk_cfg.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS;
+
     /* Note: when loading multi program the create socket fails when the 
      * the xsk_socket__create tries to load program in xsk_setup_xdp_prog.
      * To take care of this error we will inhibit the program load and then
@@ -650,23 +749,18 @@ static struct xsk_socket_info *xsk_configure_socket(struct xs_cfg *cfg,
     xsk_cfg.libbpf_flags |= XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD;
     xsk_cfg.xdp_flags = 0;
     xsk_cfg.bind_flags = 0;
-    // xsk_cfg.bind_flags |= XDP_FLAGS_UPDATE_IF_NOEXIST;
-    // ret = xsk_socket__create(&xsk_info->xsk, cfg->ifname,
-    //              cfg->xsk_if_queue, umem->umem, &xsk_info->rx,
-    //              &xsk_info->tx, &xsk_cfg);
-
-    ret = xsk_socket__create_shared(&xsk_info->xsk, cfg->ifname,
-                cfg->xsk_if_queue, umem->umem, 
-                &xsk_info->rx,
-                &xsk_info->tx,
-                &umem->fq,
-                &umem->cq,
-                &xsk_cfg);
+    ret = xsk_socket__create(&xsk_info->xsk, cfg->ifname,
+                 cfg->xsk_if_queue, umem->umem, &xsk_info->rx,
+                 &xsk_info->tx, &xsk_cfg);
 
     if (ret) {
         pr_warn("Create socket failed with ret: %d", ret);
         goto err;
     }
+
+    // ret = bpf_get_link_xdp_id(cfg->ifindex, &prog_id, cfg->xdp_flags);
+    // if (ret)
+    //     goto error_exit;
 
     /* Get pinned xsks_map fd and set it up the socket in map*/
     char buf[PATH_MAX];
@@ -681,8 +775,10 @@ static struct xsk_socket_info *xsk_configure_socket(struct xs_cfg *cfg,
         goto err;
     }
 
-    if (!xsk_info->xsk)
+    if (!xsk_info->xsk) {
         pr_info("xsk_info->xsk not defined");
+        goto err;
+    }
 
     int xsk_fd = xsk_socket__fd(xsk_info->xsk);
     if (xsk_fd < 0) {
@@ -690,7 +786,7 @@ static struct xsk_socket_info *xsk_configure_socket(struct xs_cfg *cfg,
         goto err;
     }
 
-    ret = bpf_map_update_elem(map_fd, &ifindex,
+    ret = bpf_map_update_elem(map_fd, &cfg->xsk_if_queue,
                    &xsk_fd, 0);            
     if (ret) {
         pr_warn("Could not add the interface to the xsks_map");
@@ -705,22 +801,21 @@ static struct xsk_socket_info *xsk_configure_socket(struct xs_cfg *cfg,
     xsk_info->umem_frame_free = NUM_FRAMES;
 
     /* Stuff the receive path with buffers, we assume we have enough */
-    ret = xsk_ring_prod__reserve(&umem->fq,
+    ret = xsk_ring_prod__reserve(&xsk_info->umem->fq,
                      XSK_RING_PROD__DEFAULT_NUM_DESCS,
                      &idx);
 
-    if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
-        pr_warn("xsk_ring_prod__reserve did not reserve the requested number of descritors");
+    if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
         goto err;
-    }
 
     for (i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i ++)
-        *xsk_ring_prod__fill_addr(&umem->fq, idx++) =
+        *xsk_ring_prod__fill_addr(&xsk_info->umem->fq, idx++) =
             xsk_alloc_umem_frame(xsk_info);
 
-    xsk_ring_prod__submit(&umem->fq,
+    xsk_ring_prod__submit(&xsk_info->umem->fq,
                   XSK_RING_PROD__DEFAULT_NUM_DESCS);
 
+    pr_warn("xsk_info fd %d", xsk_socket__fd(xsk_info->xsk));
     return xsk_info;
 
 err:
@@ -778,6 +873,351 @@ int xswitch_xsk__create_umem(struct xsk_umem_info **umem)
     return 0;
 }
 
+
+static struct xsk_socket_info *
+xsk__configure_shared_socket(struct xsk_umem_info *umem, const char *brname, uint32_t ifindex,
+                     uint32_t queue_id, enum xdp_attach_mode mode)
+{
+    struct xsk_socket_config xsk_cfg;
+    struct xsk_socket_info *xsk_info;
+    char devname[IF_NAMESIZE];
+    uint32_t idx = 0, prog_id = 0;
+    int i, prog_fd;
+    int ret;
+    pr_warn("%s 1", __func__);
+    xsk_info = calloc(1, sizeof(*xsk_info));
+    if (!xsk_info)
+        return NULL;
+
+    if (if_indextoname(ifindex, devname) == NULL) {
+        pr_warn("ifindex %d to devname failed", ifindex);
+        free(xsk_info);
+        return NULL;
+    }
+    pr_warn("%s 2", __func__);
+    xsk_info->umem = umem;
+    xsk_cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
+    xsk_cfg.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS;
+
+    /* Note: when loading multi program the create socket fails when the 
+     * the xsk_socket__create tries to load program in xsk_setup_xdp_prog.
+     * To take care of this error we will inhibit the program load and then
+     * we will load the program ourselves. */
+    xsk_cfg.libbpf_flags = 0;
+    xsk_cfg.libbpf_flags |= XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD;
+    xsk_cfg.xdp_flags = 0;
+    xsk_cfg.bind_flags = mode;
+    pr_warn("%s 3", __func__);
+    // ret = xsk_socket__create(&xsk_info->xsk, devname,
+    //              queue_id, umem->umem, &xsk_info->rx,
+    //              &xsk_info->tx, &xsk_cfg);
+    
+    ret = xsk_socket__create_shared(&xsk_info->xsk, devname,
+                queue_id, umem->umem, 
+                &xsk_info->rx,
+                &xsk_info->tx,
+                &umem->fq,
+                &umem->cq,
+                &xsk_cfg);
+
+    if (ret) {
+        pr_warn("Create socket failed with ret: %d", ret);
+        goto err;
+    }
+
+    // ret = bpf_get_link_xdp_id(ifindex, &prog_id, xsk_cfg.xdp_flags);
+    // if (ret) {
+    //     pr_warn("Could not get the prog id");
+    //     goto err;
+    // }
+
+    // prog_fd = bpf_prog_get_fd_by_id(prog_id);
+    // if (prog_fd < 0) {
+    //     pr_warn("Could not find the prog_fd\n");
+    //     goto err;
+    // }
+
+    int xsks_map_fd = xsk__multiprog_lookup_xsks_fd(ifindex);
+    if (xsks_map_fd < 0) {
+        pr_warn("Could no find xsks_map");
+        goto err;
+    }
+
+    pr_warn("%s 7", __func__);
+    int xsk_fd = xsk_socket__fd(xsk_info->xsk);
+    if (xsk_fd < 0) {
+        pr_warn("Invalid xsk_fd returned");
+        goto err;
+    }
+    pr_warn("%s 8", __func__);
+    ret = bpf_map_update_elem(xsks_map_fd, &queue_id,
+                   &xsk_fd, 0);            
+    if (ret) {
+        pr_warn("Could not add the interface to the xsks_map");
+        goto err;
+    }
+
+    pr_warn("xsk_info fd %d", xsk_socket__fd(xsk_info->xsk));
+    return xsk_info;
+
+err:
+    pr_warn("%s 9", __func__);
+    errno = -ret;
+    free(xsk_info);
+    return NULL;
+}
+
+static struct xsk_socket_info *
+xsk__configure_socket(struct xsk_umem_info *umem, const char *brname, uint32_t ifindex,
+                     uint32_t queue_id, enum xdp_attach_mode mode)
+{
+    struct xsk_socket_config xsk_cfg;
+    struct xsk_socket_info *xsk_info;
+    char devname[IF_NAMESIZE];
+    uint32_t idx = 0, prog_id = 0;
+    int i, prog_fd;
+    int ret;
+    pr_warn("%s 1", __func__);
+    xsk_info = calloc(1, sizeof(*xsk_info));
+    if (!xsk_info)
+        return NULL;
+
+    if (if_indextoname(ifindex, devname) == NULL) {
+        pr_warn("ifindex %d to devname failed", ifindex);
+        free(xsk_info);
+        return NULL;
+    }
+    pr_warn("%s 2", __func__);
+    xsk_info->umem = umem;
+    xsk_cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
+    xsk_cfg.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS;
+
+    /* Note: when loading multi program the create socket fails when the 
+     * the xsk_socket__create tries to load program in xsk_setup_xdp_prog.
+     * To take care of this error we will inhibit the program load and then
+     * we will load the program ourselves. */
+    xsk_cfg.libbpf_flags = 0;
+    xsk_cfg.libbpf_flags |= XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD;
+    xsk_cfg.xdp_flags = 0;
+    xsk_cfg.bind_flags = mode;
+    pr_warn("%s 3", __func__);
+    ret = xsk_socket__create(&xsk_info->xsk, devname,
+                 queue_id, umem->umem, &xsk_info->rx,
+                 &xsk_info->tx, &xsk_cfg);
+    
+    if (ret) {
+        pr_warn("Create socket failed with ret: %d", ret);
+        goto err;
+    }
+
+    // ret = bpf_get_link_xdp_id(ifindex, &prog_id, xsk_cfg.xdp_flags);
+    // if (ret) {
+    //     pr_warn("Could not get the prog id");
+    //     goto err;
+    // }
+
+    // prog_fd = bpf_prog_get_fd_by_id(prog_id);
+    // if (prog_fd < 0) {
+    //     pr_warn("Could not find the prog_fd\n");
+    //     goto err;
+    // }
+
+    int xsks_map_fd = xsk__multiprog_lookup_xsks_fd(ifindex);
+    if (xsks_map_fd < 0) {
+        pr_warn("Could no find xsks_map");
+        goto err;
+    }
+
+    pr_warn("%s 7", __func__);
+    int xsk_fd = xsk_socket__fd(xsk_info->xsk);
+    if (xsk_fd < 0) {
+        pr_warn("Invalid xsk_fd returned");
+        goto err;
+    }
+    pr_warn("%s 8", __func__);
+    ret = bpf_map_update_elem(xsks_map_fd, &queue_id,
+                   &xsk_fd, 0);            
+    if (ret) {
+        pr_warn("Could not add the interface to the xsks_map");
+        goto err;
+    }
+
+    pr_warn("Initialize umem");
+    /* Initialize umem frame allocation */
+
+    for (i = 0; i < NUM_FRAMES; i++)
+        xsk_info->umem_frame_addr[i] = i * FRAME_SIZE;
+
+    xsk_info->umem_frame_free = NUM_FRAMES;
+
+    /* Stuff the receive path with buffers, we assume we have enough */
+    ret = xsk_ring_prod__reserve(&xsk_info->umem->fq,
+                     XSK_RING_PROD__DEFAULT_NUM_DESCS,
+                     &idx);
+
+    if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
+        goto err;
+
+    for (i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i ++)
+        *xsk_ring_prod__fill_addr(&xsk_info->umem->fq, idx++) =
+            xsk_alloc_umem_frame(xsk_info);
+
+    xsk_ring_prod__submit(&xsk_info->umem->fq,
+                  XSK_RING_PROD__DEFAULT_NUM_DESCS);
+
+    pr_warn("xsk_info fd %d", xsk_socket__fd(xsk_info->xsk));
+    return xsk_info;
+
+err:
+    pr_warn("%s 9", __func__);
+    errno = -ret;
+    free(xsk_info);
+    return NULL;
+}
+
+// creates umem
+struct xsk_socket_info *
+xswitch_xsk__configure(const char *brname, int ifindex, int queue_id, enum xdp_attach_mode mode) 
+{
+    struct xsk_socket_info *xsk;
+    void *packet_buffer;
+    uint64_t packet_buffer_size;
+    struct xsk_umem_info *umem;
+    
+    pr_warn("%s 1", __func__);
+    /* Allocate memory for NUM_FRAMES of the default XDP frame size */
+    packet_buffer_size = NUM_FRAMES * FRAME_SIZE * 6;
+    if (posix_memalign(&packet_buffer,
+            getpagesize(), /* PAGE_SIZE aligned */
+            packet_buffer_size)) {
+        pr_warn("Can't allocate buffer memory");
+        return errno;
+    }
+    pr_warn("%s 2", __func__);
+    /* Initialize shared packet_buffer for umem usage */
+    umem = configure_xsk_umem(packet_buffer, packet_buffer_size);
+    if (umem == NULL) {
+        pr_warn("Can't create umem");
+        return errno;
+    }
+    pr_warn("%s 3", __func__);
+    xsk = xsk__configure_socket(umem, brname, ifindex, queue_id, mode);
+    if (!xsk) {
+        /* Clean up umem and xpacket pool. */
+        if (xsk_umem__delete(umem->umem)) {
+            pr_warn("xsk_umem__delete failed.");
+        }
+        /* TODO: delete/free the allocated buffer */
+        free(umem);
+    }
+    pr_warn("%s 4", __func__);
+    return xsk;
+}
+
+int
+xswitch_xsk__configure_queue(struct xsk_socket_info **xsks, const char *brname, int queue_id, 
+                                int ifindex, enum xdp_attach_mode mode)
+{
+    struct xsk_socket_info *xsk_info;
+
+    pr_warn("ifindex %d: configuring queue: %d, mode: %d, use-need-wakeup",
+             ifindex, queue_id, mode);
+    xsk_info = xswitch_xsk__configure(brname, ifindex, queue_id, mode);
+    if (!xsk_info) {
+        pr_warn("ifindex %d: Failed to create AF_XDP socket on queue %d in %d mode.",
+             ifindex, queue_id, mode);
+        xsks[queue_id] = NULL;
+        return -1;
+    }
+    xsks[queue_id] = xsk_info;
+    return 0;
+}
+
+int
+xswitch_xsk__configure_all(struct xsk_socket_info **xsks, struct xs_cfg *cfg, int n_rxq)
+{
+    int qid = 0;
+    // struct xsk_socket_info *xsk_info[n_rxq];
+
+    int ifindex = if_nametoindex(cfg->ifname);
+    if (ifindex < 0) {
+        pr_warn("Invalid ifname");
+        return -1;
+    }
+    pr_warn("%s 1", __func__);
+    pr_warn("%s cfg->brname %s", __func__, cfg->brname);
+    pr_warn("%s qid %d", __func__, qid);
+    pr_warn("%s ifindex %d", __func__, ifindex);
+    pr_warn("%s cfg->mode %d", __func__, cfg->mode);
+    pr_warn("%s 2", __func__);
+    for (; qid < n_rxq; qid++) {
+        if (xswitch_xsk__configure_queue(xsks, cfg->brname, qid, ifindex, cfg->mode)) {
+            pr_warn("%s: Failed to create AF_XDP socket on queue %d.",
+                     cfg->ifname, qid);
+            goto err;
+        }
+    }
+
+    for (int i = 0; i < n_rxq; i++) {
+        pr_warn("checking sock %d fd %d", i, xsk_socket__fd(xsks[i]->xsk));
+    }
+    pr_warn("%s 2", __func__);
+    // *sockp = xsk_info;
+    return 0;
+
+err:
+    return EINVAL;
+}
+
+int
+xswitch_xsk__configure_queue_shared(struct xsk_socket_info **xsks, struct xsk_umem_info *umem, const char *brname, int queue_id, 
+                                int ifindex, enum xdp_attach_mode mode)
+{
+    struct xsk_socket_info *xsk_info;
+
+    pr_warn("ifindex %d: configuring queue: %d, mode: %d, use-need-wakeup",
+             ifindex, queue_id, mode);
+    xsk_info = xsk__configure_shared_socket(umem, brname, ifindex, queue_id, mode);
+    if (!xsk_info) {
+        pr_warn("ifindex %d: Failed to create AF_XDP socket on queue %d in %d mode.",
+             ifindex, queue_id, mode);
+        xsks[queue_id] = NULL;
+        return -1;
+    }
+    xsks[queue_id] = xsk_info;
+    return 0;
+}
+
+int
+xswitch_xsk__shared_configure_all(struct xsk_socket_info **xsks, struct xsk_umem_info *umem, struct xs_cfg *cfg, int n_rxq)
+{
+    int qid = 0;
+
+    int ifindex = if_nametoindex(cfg->ifname);
+    if (ifindex < 0) {
+        pr_warn("Invalid ifname");
+        return -1;
+    }
+
+    for (; qid < n_rxq; qid++) {
+        if (xswitch_xsk__configure_queue_shared(xsks, umem, cfg->brname, qid, ifindex, cfg->mode)) {
+            pr_warn("%s: Failed to create AF_XDP socket on queue %d.",
+                     cfg->ifname, qid);
+            goto err;
+        }
+    }
+
+    for (int i = 0; i < n_rxq; i++) {
+        pr_warn("checking sock %d fd %d", i, xsk_socket__fd(xsks[i]->xsk));
+    }
+    pr_warn("%s 2", __func__);
+    // *sockp = xsk_info;
+    return 0;
+
+err:
+    return EINVAL;
+}
+
 int
 xdp_xsk_create__v2(struct xsk_socket_info **sockp, struct xs_cfg *cfg, struct xsk_umem_info *umem)
 {
@@ -790,7 +1230,7 @@ xdp_xsk_create__v2(struct xsk_socket_info **sockp, struct xs_cfg *cfg, struct xs
     int ifindex = if_nametoindex(cfg->ifname);
     if (ifindex < 0) {
         pr_warn("Invalid ifname");
-        return NULL;
+        return -1;
     }
 
     xsk_info = calloc(1, sizeof(*xsk_info));
@@ -847,13 +1287,14 @@ xdp_xsk_create__v2(struct xsk_socket_info **sockp, struct xs_cfg *cfg, struct xs
         goto err;
     }
 
-    ret = bpf_map_update_elem(map_fd, &ifindex,
+    ret = bpf_map_update_elem(map_fd, &cfg->xsk_if_queue,
                    &xsk_fd, 0);            
     if (ret) {
         pr_warn("Could not add the interface to the xsks_map");
         goto err;
     }
 
+    pr_warn("xsk_info fd %d", xsk_socket__fd(xsk_info->xsk));
     *sockp = xsk_info;
     return 0;
 
@@ -1383,6 +1824,13 @@ out:
     if (map_fd >= 0)
         close(map_fd);
     return err;
+}
+
+/* Network Interrace management */
+int
+xswitch_net__n_rxq(const char *ifname)
+{
+    return net__n_rxq(ifname);
 }
 
 /* entry point flow stats */

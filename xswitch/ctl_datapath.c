@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "ctl_datapath.h"
-#include "xf_netdev.h"
+#include "net_utils.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -103,7 +103,7 @@ int add_dp_cmd(int argc, char **argv,  void *params)
     char brname[IFNAMSIZ] = {'\0'};
     strncpy(brname, argv[1], IFNAMSIZ-1);
 
-    error = bridge__create(brname);
+    error = net_bridge__create(brname);
     if (error == EINVAL)
         error = -EINVAL;
 
@@ -127,7 +127,7 @@ int del_dp_cmd(int argc, char **argv,  void *params)
     char brname[IFNAMSIZ] = {'\0'};
     strncpy(brname, argv[1], IFNAMSIZ-1);
 
-    error = bridge__delete(brname);
+    error = net_bridge__delete(brname);
     if (error == EINVAL)
         error = -EINVAL;
 

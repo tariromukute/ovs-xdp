@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "ctl_port.h"
-#include "xf_netdev.h"
+#include "net_utils.h"
 #include "datapath.h"
 
 #pragma GCC diagnostic push
@@ -112,7 +112,7 @@ int add_port_cmd(int argc, char **argv,  void *params)
     char ifname[IFNAMSIZ] = {'\0'};
     strncpy(ifname, argv[2], IFNAMSIZ-1);
 
-    error = bridge__add_port(brname, ifname);
+    error = net_bridge__add_port(brname, ifname);
     if (error == EINVAL)
         error = -EINVAL;
 
@@ -171,7 +171,7 @@ int remove_port_cmd(int argc, char **argv,  void *params)
     char ifname[IFNAMSIZ] = {'\0'};
     strncpy(ifname, argv[2], IFNAMSIZ-1);
 
-    error = bridge__remove_port(brname, ifname);
+    error = net_bridge__remove_port(brname, ifname);
     if (error == EINVAL)
         error = -EINVAL;
 

@@ -21,12 +21,12 @@
 
 // static inline __u64 ether_addr_to_u64(const __u8 *addr)
 // {
-// 	__u64 u = 0;
-// 	int i;
+//     __u64 u = 0;
+//     int i;
 
-// 	for (i = ETH_ALEN; i >= 0; i--)
-// 		u = u << 8 | addr[i];
-// 	return u;
+//     for (i = ETH_ALEN; i >= 0; i--)
+//         u = u << 8 | addr[i];
+//     return u;
 // }
 
 static __always_inline int xdp_unspec(struct xdp_md *ctx)
@@ -520,7 +520,7 @@ static __always_inline int xdp_upcall(struct xdp_md *ctx,
 
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
-    int index = ctx->ingress_ifindex;
+    int rxq_index = ctx->rx_queue_index;
 
     /* Record upcall stats */
     struct xfu_stats *stats = bpf_map_lookup_elem(&_xf_stats_map, key);
@@ -566,7 +566,87 @@ static __always_inline int xdp_upcall(struct xdp_md *ctx,
     }
 
     memcpy(up, &upcall, sizeof(upcall));
-    return index;  
+    return rxq_index;  
+}
+
+/* Metadata will be in the perf event for upcall before the packet data. */
+struct U {
+    __u16 cookie;
+    __u16 pkt_len;
+} __attribute__((packed));
+
+static __always_inline int xdp_upcall_perf(struct xdp_md *ctx,
+                    struct xf_key *key)
+{
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+    int ret = -1;
+    // bpf_printk("doing xdp_upcall_perf\n");
+    /* Record upcall stats */
+    struct xfu_stats *stats = bpf_map_lookup_elem(&_xf_stats_map, key);
+    if (stats) {
+         /* Calculate packet length */
+        __u64 bytes = data_end - data;
+
+        /* BPF_MAP_TYPE_PERCPU_ARRAY returns a data record specific to current
+        * CPU and XDP hooks runs under Softirq, which makes it safe to update
+        * without atomic operations.
+        */
+        stats->rx_packets++;
+        stats->rx_bytes += bytes;
+    } else {
+        struct xfu_stats s;
+        memset(&s, 0, sizeof(struct xfu_stats));
+        bpf_map_update_elem(&_xf_stats_map, key, &s, 0);
+    }
+
+    /* Add upcall information at the head of the packet */
+    // struct xf_upcall upcall;
+    // memset(&upcall, 0, sizeof(upcall));
+    // upcall.type = XDP_PACKET_CMD_MISS;
+    // upcall.subtype = 0;
+    // upcall.ifindex = ctx->ingress_ifindex;
+    // upcall.pkt_len = data_end - data;
+    // __builtin_memcpy(&upcall.key, key, sizeof(*key));
+
+    if (data_end > data) {
+        
+        /* The XDP perf_event_output handler will use the upper 32 bits
+            * of the flags argument as a number of bytes to include of the
+            * packet payload in the event data. If the size is too big, the
+            * call to bpf_perf_event_output will fail and return -EFAULT.
+            *
+            * See bpf_xdp_event_output in net/core/filter.c.
+            *
+            * The BPF_F_CURRENT_CPU flag means that the event output fd
+            * will be indexed by the CPU number in the event map.
+            */
+        
+            
+        __u64 flags = BPF_F_CURRENT_CPU;
+        __u16 sample_size;
+        int ret;
+        struct U metadata;
+
+        metadata.cookie = UPCALL_COOKIE;
+        metadata.pkt_len = (__u16)(data_end - data);
+        sample_size = MIN(metadata.pkt_len, MAX_FRAME_SIZE);
+
+        flags |= (__u64)sample_size << 32;
+
+        ret = bpf_perf_event_output(ctx, &_upcall_map, flags,
+                        &metadata, sizeof(metadata));
+        if (ret)
+            bpf_printk("perf_event_output failed: %d\n", ret);
+        
+        if (!ret)
+            return 0;
+    }
+    
+    bpf_printk("xf loader failed\n");
+    return ret;
+
+    
 }
 
 #endif /* XF_ACTIONS_H */

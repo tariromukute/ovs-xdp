@@ -56,7 +56,7 @@ struct micro_flow_map {
     __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
     __uint(key_size, sizeof(struct xf_key));
     __uint(value_size, sizeof(struct xfa_buf));
-    __uint(max_entries, 10);
+    __uint(max_entries, MAX_MICRO_FLOWS);
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xf_micro_map SEC(".maps");
 
@@ -70,10 +70,10 @@ struct micro_flow_map {
 // } _xf_macro_map SEC(".maps");
 
 struct macro_flow_map {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(key_size, sizeof(struct xf_key));
     __uint(value_size, sizeof(struct xfa_buf));
-    __uint(max_entries, 10);
+    __uint(max_entries, MAX_MACRO_FLOWS);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } _xf_macro_map SEC(".maps");
 
@@ -101,8 +101,8 @@ struct {
     __uint(type, BPF_MAP_TYPE_XSKMAP);
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(int));
-    __uint(max_entries, 12);
-    __uint(pinning, LIBBPF_PIN_BY_NAME);
+    __uint(max_entries, 64);
+    // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } xsks_map SEC(".maps");
 
 /* map #4 */
@@ -116,8 +116,17 @@ struct {
 
 /* map #4 */
 struct {
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+    __uint(key_size, sizeof(int));
+    __uint(value_size, sizeof(__u32));
+    __uint(max_entries, MAX_CPUS);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} _upcall_map SEC(".maps");
+
+/* map #4 */
+struct {
     __uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
-    __uint(max_entries, 12);
+    __uint(max_entries, 64);
     __uint(key_size, IFNAMSIZ);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
     __array(values, struct micro_flow_map);
@@ -131,7 +140,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
     __uint(key_size, sizeof(int));
     __uint(value_size, sizeof(int));
-    __uint(max_entries, 12);
+    __uint(max_entries, 128);
     // __uint(pinning, LIBBPF_PIN_BY_NAME);
 } tx_port SEC(".maps");
 
@@ -139,7 +148,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(key_size, sizeof(struct xf_key));
     __uint(value_size, sizeof(struct xfu_stats));
-    __uint(max_entries, 10);
+    __uint(max_entries, MAX_MICRO_FLOWS);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
 } _xf_stats_map SEC(".maps");
 
@@ -346,14 +355,16 @@ out:
     return -1;
 }
 
-__u8 log_level = LOG_DEBUG;
+static __always_inline int search_flow
+
+__u8 log_level = LOG_WARN;
 
 /* Metadata will be in the perf event before the packet data. */
 struct S {
     __u16 cookie;
     __u16 pkt_len;
     __u16 data_len; // the length of the data
-    __u8 data[XFA_BUF_MAX_SIZE]; // the data being sent via perf
+    __u8 data[MAX_PERF_DATA]; // the data being sent via perf
 } __attribute__((packed));
 
 static __always_inline int logger(struct xdp_md *ctx, __u16 log_type,
@@ -402,10 +413,6 @@ static __always_inline int logger(struct xdp_md *ctx, __u16 log_type,
     bpf_printk("xf loader failed\n");
     return -1;
 }
-
-#define SAMPLE_SIZE 64ul
-// #define SAMPLE_SIZE sizeof(struct xdp_flow_key)
-#define MAX_CPUS 128
 
 /* Action header cursor to keep track of current parsing position */
 struct act_cursor {

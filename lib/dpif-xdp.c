@@ -104,7 +104,7 @@ static struct shash dp_xdps OVS_GUARDED_BY(dp_xdp_mutex)
 
 /* An AF_XDP channel to communicate between the kernel and userspace */
 struct dp_channel {
-    struct xsk_socket_info *sock;
+    struct xsk_socket_info *sock; /* Array of socks */
     long long int last_poll;    /* Last time this channel was polled. */
 };
 
@@ -114,6 +114,7 @@ struct dp_handler {
     int n_events;                 /* Num events returned by epoll_wait(). */
     int event_offset;             /* Offset into 'epoll_events'. */
     struct pollfd *fds;
+    struct dp_channel *channels; /* Array of channels for each handler */
 };
 
 struct dp_xdp {
@@ -143,9 +144,9 @@ struct dp_xdp {
     uint32_t n_handlers;            /* Num of upcall handlers. */
     struct dp_handler *handlers;   /* Array of handlers */
 
-    /* Upcall channels. */
+    // /* Upcall channels. */
     int n_channels;
-    struct dp_channel *channels; /* Array of channels */
+    // struct dp_channel *channels; /* Array of channels */
 
 };
 
@@ -183,6 +184,9 @@ struct dp_xdp_port {
        - do_del_port
        - deleteing of entry points 
        - etc */
+    
+    struct xsk_umem_info *umem;
+    struct xsk_socket_info **xsks; /* Array of af_xdp sockets. Length = n_rxq */
 };
 
 /* Interface to xdp-based datapath. */
@@ -326,7 +330,7 @@ static void port_destroy(struct dp_xdp_port *port);
 static void do_del_port(struct dp_xdp *dp, struct dp_xdp_port *port)
     OVS_REQUIRES(dp->port_mutex);
 static int port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
-                  struct xsk_socket_info *sock);
+                  struct xsk_socket_info **xsks, int n_socks);
 static odp_port_t choose_port(struct dp_xdp *dp, const char *name)
     OVS_REQUIRES(dp->port_mutex);
 static int port_create(const char *devname, const char *type,
@@ -647,33 +651,40 @@ static int
 port_create(const char *devname, const char *type,
             odp_port_t port_no, struct dp_xdp_port **portp)
 {
+    VLOG_INFO("%s", __func__);
     int error = 0;
+    VLOG_INFO("%s 1", __func__);
     struct dp_xdp_port *port;
+    VLOG_INFO("%s 2", __func__);
     enum netdev_flags flags;
     struct netdev *netdev;
     int ifindex = -1;
-
+    VLOG_INFO("%s 3", __func__);
     *portp = NULL;
-
+    VLOG_INFO("%s 4", __func__);
     /* Open and validate network device. */
     error = netdev_open(devname, type, &netdev);
     if (error) {
         return error;
     }
-
+    VLOG_INFO("%s 5", __func__);
     ifindex = if_nametoindex(devname);
     if (ifindex == -1 || ifindex == 0) {
         goto out;
     }
-
-    /* XXX reject non-Ethernet devices */
-    netdev_get_flags(netdev, &flags);
-    if (flags & NETDEV_LOOPBACK) {
-        VLOG_ERR("%s: cannot add a loopback device", devname);
-        error = EINVAL;
-        goto out;
-    }
-
+    unsigned n_rxq = xswitch_net__n_rxq(devname);
+    
+    VLOG_INFO("%s 6.7 n_rxq %d", __func__, n_rxq);
+    // /* XXX reject non-Ethernet devices */
+    // // netdev_get_flags(netdev, &flags);
+    // // if (flags & NETDEV_LOOPBACK) {
+    // //     VLOG_ERR("%s: cannot add a loopback device", devname);
+    // //     error = EINVAL;
+    // //     goto out;
+    // // }
+    VLOG_INFO("--- %s netdev_n_rxq ---", __func__);
+    // unsigned n_rxq = netdev_n_rxq(netdev);
+    VLOG_INFO("--- %s netdev_n_rxq n_rxq %d ---", __func__, n_rxq);
     port = xzalloc(sizeof *port);
     port->port_no = port_no;
     port->ifindex = ifindex;
@@ -684,6 +695,11 @@ port_create(const char *devname, const char *type,
     port->emc_enabled = true;
     port->need_reconfigure = true;
     port->n_upcall_pids = 1;
+    port->n_rxq = n_rxq;
+    xswitch_xsk__create_umem__v2(&port->umem);
+    VLOG_INFO("--- %s xcalloc(n_rxq, sizeof *port->xsks) ---", __func__);
+    port->xsks = xcalloc(n_rxq, sizeof *port->xsks);
+    VLOG_INFO("--- %s xcalloc(n_rxq, *port->xsks) ---", __func__);
     port->upcall_pids = xzalloc(sizeof *port->upcall_pids);
     ovs_mutex_init(&port->txq_used_mutex);
 
@@ -700,20 +716,22 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
             odp_port_t port_no)
     OVS_REQUIRES(dp->port_mutex)
 {
+    VLOG_INFO("%s", __func__);
     struct dp_xdp_port *port;
     struct dp_xdp_entry_point *ep;
     struct xsk_socket_info *sock = NULL;
     
     int error = 0;
-    
+    VLOG_INFO("%s get_port_by_name", __func__);
     if (!get_port_by_name(dp, devname, &port)) {
         return EEXIST;
     }
-
+    VLOG_INFO("%s port_create", __func__);
     error = port_create(devname, type, port_no, &port);
     if (error) {
         return error;
     }
+    VLOG_INFO("%s port_create 2", __func__);
 
     hmap_insert(&dp->ports, &port->node, hash_port_no(port_no));
     seq_change(dp->port_seq);
@@ -745,10 +763,19 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
         goto out;
     }
 
+    /* After adding an XDP program, the number of n_rxq might change 
+     * seeing this behavior on virtio. This might be due to the requirement
+     * of 2*N queues for XDP program (which is imposed by XDP_TX). So need
+     * to update the n_rxq after loading the dp program */
+    port->n_rxq = xswitch_net__n_rxq(devname);
+    port->xsks = xrealloc(port->xsks,
+                port->n_rxq * sizeof *port->xsks);
+
     // add socket for upcall
     fat_rwlock_wrlock(&dp->upcall_lock);
-    VLOG_INFO("--- %s xdp_xsk_create__v2 1 ---", __func__);
-    error = xdp_xsk_create__v2(&sock, &cfg, ep->umem);
+    VLOG_INFO("--- %s xdp_xsk_create__v2 1 port->n_rxq %d ---", __func__, port->n_rxq);
+    // error = xdp_xsk_create(&sock, &cfg, ep->umem);
+    error = xswitch_xsk__configure_all(port->xsks, &cfg, port->n_rxq);
     VLOG_INFO("--- %s xdp_xsk_create__v2 2 ---", __func__);
     fat_rwlock_unlock(&dp->upcall_lock);
     if (error) {
@@ -756,13 +783,12 @@ do_add_port(struct dp_xdp *dp, const char *devname, const char *type,
         goto out;
     }
 
-    VLOG_INFO("--- %s xsk_socket__fd 1 ---", __func__);
-    int fd = xsk_socket__fd(sock->xsk);
-    VLOG_INFO("--- %s xsk_socket__fd 2 ---", __func__);
-    port->upcall_pids[0] = fd;
+    for (int i = 0; i < port->n_rxq; i++) {
+        VLOG_INFO("%s checking sock %d fd %d", __func__, i, xsk_socket__fd(port->xsks[i]->xsk));
+    }
 
     VLOG_INFO("--- %s port_add_channel 1 ---", __func__);
-    error = port_add_channel(dp, port_no, sock);
+    error = port_add_channel(dp, port_no, port->xsks, port->n_rxq);
     if (error) {
         VLOG_INFO("--- %s error 3 %d ---", __func__, error);
     }
@@ -816,11 +842,12 @@ port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
     /* Since the nl_sock can only be assigned in either all
      * or none "dpif" channels, the following check
      * would suffice. */
-    if (!dp->channels[port_idx].sock) {
-        return false;
-    }
+    // TODO: fix this
+    // if (!dp->channels[port_idx].sock) {
+    //     return false;
+    // }
 
-    *upcall_pid = xsk_socket__fd(dp->channels[port_idx].sock->xsk);
+    // *upcall_pid = xsk_socket__fd(dp->channels[port_idx].sock->xsk);
 
     return true;
 }
@@ -828,16 +855,19 @@ port_get_pid(struct dp_xdp *dp, uint32_t port_idx,
 
 static int
 port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
-                  struct xsk_socket_info *sock)
+                  struct xsk_socket_info **xsks, int n_socks)
 {
     uint32_t port_idx = odp_to_u32(port_no);
-    size_t i;
+    size_t i, j;
 
+    VLOG_INFO("func %s 1", __func__);
     if (dp->handlers == NULL) {
-        xsk_sock_close(sock);
+        for (i = 0; i < n_socks; i++)
+            xsk_sock_close(xsks[i]);
         return 0;
     }
 
+    VLOG_INFO("func %s 2", __func__);
     /* We assume that the datapath densely chooses port numbers, which can
      * therefore be used as an index into 'channels' and 'pollfds' of
      * 'dpif'. */
@@ -850,19 +880,21 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
             return EFBIG;
         }
 
-        dp->channels = xrealloc(dp->channels,
-                                  new_size * sizeof *dp->channels);
 
-        for (i = dp->n_channels; i < new_size; i++) {
-            dp->channels[i].sock = NULL;
-        }
-
-        for (i = 0; i < dp->n_handlers; i++) {
-            struct dp_handler *handler = &dp->handlers[i];
+        VLOG_INFO("func %s 4", __func__);
+        for (j = 0; j < dp->n_handlers; j++) {
+            struct dp_handler *handler = &dp->handlers[j];
 
             handler->fds = xrealloc(handler->fds,
                 new_size * sizeof *handler->fds);
 
+            handler->channels = xrealloc(handler->channels,
+                                    new_size * sizeof *handler->channels);
+            VLOG_INFO("func %s 3", __func__);
+            for (i = dp->n_channels; i < new_size; i++) {
+                handler->channels[i].sock = NULL;
+                handler->channels[i].last_poll = LLONG_MIN;
+            }
         }
 
         // for (i = 0; i < dp->n_handlers; i++) {
@@ -875,31 +907,41 @@ port_add_channel(struct dp_xdp *dp, odp_port_t port_no,
 
         dp->n_channels = new_size;
     }
-
+    VLOG_INFO("func %s 5", __func__);
     // If port_no wasn't densely populated or port doesn't have valid fd assign it to -1
     // to be skipped during upcall
-    int j = 0;
-    for (j = 0; j < dp->n_channels; j++) {
-        if (!dp->channels[j].sock) {
-            for (i = 0; i < dp->n_handlers; i++) {
-                struct dp_handler *handler = &dp->handlers[i];
-                handler->fds[j].fd = -1; 
-                handler->fds[j].events = POLLIN; // TODO: handle events for when sock is undefined
+    // for (i = 0; i < dp->n_handlers && !xsks[i]; i++) {
+    //     struct dp_handler *handler = &dp->handlers[i];
+    //     handler->fds[j].fd = -1; 
+    //     handler->fds[j].events = POLLIN; // TODO: handle events for when sock is undefined
+    // }
+
+    for (j = 0; j < dp->n_handlers; j++) {
+        VLOG_INFO("- %s j %d -", __func__, j);
+        struct dp_handler *handler = &dp->handlers[j];
+        for (i = 0; i < dp->n_channels; i++) {
+            VLOG_INFO("- %s i %d -", __func__, i);
+            if (!handler->channels[i].sock) {
+                VLOG_INFO("-- %s i sock %d --", __func__, i);
+                handler->fds[i].fd = -1; 
+                handler->fds[i].events = POLLIN; // TODO: handle events for when sock is undefined
             }
         }
     }
 
+    VLOG_INFO("func %s 6", __func__);
     int fd = -1;
     for (i = 0; i < dp->n_handlers; i++) {
         struct dp_handler *handler = &dp->handlers[i];
-        fd = xsk_socket__fd(sock->xsk); // can be sock[i]->xsk
-        VLOG_INFO("---- Called: %s xsk_socket__fd: %d port_idx: %d ----", __func__, fd, port_idx);
-        handler->fds[port_idx].fd =  fd >= 0 ? fd : -1; // fd = 0 is valid
-        handler->fds[port_idx].events = POLLIN;
+        if ( i < n_socks) {
+            fd = xsk_socket__fd(xsks[i]->xsk); // can be sock[i]->xsk
+            VLOG_INFO("---- Called: %s xsk_socket__fd: %d port_idx: %d ----", __func__, fd, port_idx);
+            handler->fds[port_idx].fd = fd >= 0 ? fd : -1; // fd = 0 is valid
+            handler->fds[port_idx].events = POLLIN;
+            handler->channels[port_idx].sock = xsks[i];
+        }
     }
-
-    dp->channels[port_idx].sock = sock;
-    dp->channels[port_idx].last_poll = LLONG_MIN;
+    VLOG_INFO("func %s 7", __func__);
     return 0;
 }
 
@@ -910,14 +952,16 @@ port_del_channels(struct dp_xdp *dp, odp_port_t port_no)
     uint32_t port_idx = odp_to_u32(port_no);
     size_t i;
 
-    if (!dp->handlers || port_idx >= dp->n_channels
-        || !dp->channels[port_idx].sock) {
+    if (!dp->handlers || port_idx >= dp->n_channels) {
         return;
     }
 
     for (i = 0; i < dp->n_handlers; i++) {
         struct dp_handler *handler = &dp->handlers[i];
         handler->fds[port_idx].fd = -1;
+        xsk_sock_destroy(handler->channels[port_idx].sock);
+
+        handler->channels[port_idx].sock = NULL;
     }
 
     // for (i = 0; i < dp->n_handlers; i++) {
@@ -926,10 +970,6 @@ port_del_channels(struct dp_xdp *dp, odp_port_t port_no)
     //               xsk_socket__fd(dp->channels[port_idx].sock->xsk), NULL);
     //     handler->event_offset = handler->n_events = 0;
     // }
-
-    xsk_sock_destroy(dp->channels[port_idx].sock);
-
-    dp->channels[port_idx].sock = NULL;
 }
 
 static int
@@ -986,22 +1026,23 @@ dp_xdp_refresh_channels(struct dp_xdp *dp, uint32_t n_handlers)
 
         if (port_no >= dp->n_channels
             || !port_get_pid(dp, port_no, &upcall_pid)) {
-            struct xsk_socket_info *sock = NULL;
-            error = xsk_sock_create(&sock, port.name);
+            
 
+            /* TODO: fix this */
+            error = xswitch_xsk__configure_all(port.xsks, NULL, port.n_rxq);
             if (error) {
                 goto error;
             }
 
-            error = port_add_channel(dp, port.port_no, sock);
+            error = port_add_channel(dp, port.port_no, port.xsks, port.n_rxq);
             if (error) {
                 VLOG_INFO("%s: could not add channels for port %s",
                           dpif_name(dp->dpif), port.name);
-                xsk_sock_destroy(sock);
+                // xsk_sock_destroy(sock); // TODO: fix this
                 retval = error;
                 goto error;
             }
-            upcall_pid = xsk_socket__fd(sock->xsk);
+            upcall_pid = xsk_socket__fd(port.xsks[0]->xsk);
             VLOG_INFO("---- Called: %s xsk_socket__fd :%d port.port_no: %d ----", __func__, upcall_pid, port.port_no);
         }
 
@@ -1821,7 +1862,7 @@ static int dp_xdp_ep_update_flow(const struct dp_xdp_entry_point *ep,
                         struct xf *flow)
 {
     struct dp_xdp *dp = ep->dp;
-    VLOG_INFO("---- Called: %s dp->name %s ----", __func__, dp->name);
+    // VLOG_INFO("---- Called: %s dp->name %s ----", __func__, dp->name);
 
     return xswitch_br__flow_insert(dp->name, flow);
 }
@@ -1882,7 +1923,7 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
 
     /* If program exist probably want to unload and load again */
     if (!(error == EEXIST || error == -EEXIST || error == 0)) {
-        VLOG_INFO("---- error loading program ----", __func__);
+        VLOG_INFO("---- %s error loading program ----", __func__);
         goto out;
     }
     VLOG_INFO("--- Successfully loaded xdp program ep_id: %d ---", xdp_ep->ep_id);
@@ -1899,9 +1940,9 @@ dp_xdp_configure_ep(struct dp_xdp_entry_point **epp, struct dp_xdp *dp,
         cmap_insert(&dp->entry_points, CONST_CAST(struct cmap_node *, &ep->node),
                     hash_int(xdp_ep->ep_id, 0));
          /* Initialise UMEM */
-        error = xswitch_xsk__create_umem__v2(&ep->umem);
+        error = xswitch_xsk__create_umem(&ep->umem);
         if (error) {
-            VLOG_INFO("---- Called: %s xswitch_xsk__create_umem__v2 failed");
+            VLOG_INFO("---- Called: %s xswitch_xsk__create_umem__v2 failed", __func__);
             goto out;
         }
     }
@@ -2126,7 +2167,9 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
             memset(&flow, 0, sizeof(struct xf));
             memcpy(&flow.key, key, sizeof(struct xf_key));
             memcpy(&flow.actions, &acts, sizeof(struct xfa_buf));
+            // ovs_mutex_lock(&ep->flow_mutex);
             error = dp_xdp_ep_update_flow(ep, &flow);
+            // ovs_mutex_unlock(&ep->flow_mutex);
             if (error) {
                 goto out;
             }
@@ -2137,7 +2180,7 @@ flow_put_on_ep(struct dp_xdp_entry_point *ep,
         }
     } else {
         if (put->flags & DPIF_FP_MODIFY) {
-            VLOG_INFO("---- Called: %s DPIF_FP_MODIFY  not supported yet----", __func__);
+            // VLOG_INFO("---- Called: %s DPIF_FP_MODIFY  not supported yet----", __func__);
             struct dp_xdp_actions *new_actions;
             struct dp_xdp_actions *old_actions;
 
@@ -2199,13 +2242,13 @@ dpif_xf_put(struct dpif *dpif, const struct dpif_flow_put *put)
     }
 
     /* Debug print flow */
-    struct ds ds = DS_EMPTY_INITIALIZER;
-    /* XXX: Use dpif_format_flow()? */
-    odp_flow_format(put->key, put->key_len, put->mask, put->mask_len, NULL, &ds, true);
-    ds_put_cstr(&ds, ", actions=");
-    format_odp_actions(&ds, put->actions, put->actions_len, NULL);
-    VLOG_INFO("%s putting flow %s",__func__, ds_cstr(&ds));
-    ds_destroy(&ds);
+    // struct ds ds = DS_EMPTY_INITIALIZER;
+    // /* XXX: Use dpif_format_flow()? */
+    // odp_flow_format(put->key, put->key_len, put->mask, put->mask_len, NULL, &ds, true);
+    // ds_put_cstr(&ds, ", actions=");
+    // format_odp_actions(&ds, put->actions, put->actions_len, NULL);
+    // VLOG_INFO("%s putting flow %s",__func__, ds_cstr(&ds));
+    // ds_destroy(&ds);
 
     struct xf_key key;
     memset(&key, 0, sizeof(struct xf_key));
@@ -2832,7 +2875,7 @@ static int
 dpif_xdp_port_dump_next(const struct dpif *dpif, void *state_,
                           struct dpif_port *dpif_port)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     struct dpif_xdp_port_state *state = state_;
     struct dp_xdp *dp = get_dp_xdp(dpif);
     struct hmap_node *node;
@@ -3042,22 +3085,22 @@ dpif_xf_dump_next(struct dpif_flow_dump_thread *thread_,
     ovs_mutex_unlock(&dump->mutex);
 
     for (size_t i = 0; i < n_flows; i++) {
-        // struct odputil_keybuf *maskbuf = &thread->maskbuf[i];
-        // struct odputil_keybuf *keybuf = &thread->keybuf[i];
-        // struct odputil_keybuf *actbuf = &thread->actbuf[i];
-        // struct xf *xf = &xfs[i];
-        // struct dpif_flow *f = &flows[i];
-        // struct ofpbuf key, mask, act;
+        struct odputil_keybuf *maskbuf = &thread->maskbuf[i];
+        struct odputil_keybuf *keybuf = &thread->keybuf[i];
+        struct odputil_keybuf *actbuf = &thread->actbuf[i];
+        struct xf *xf = &xfs[i];
+        struct dpif_flow *f = &flows[i];
+        struct ofpbuf key, mask, act;
 
-        // ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
-        // ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
-        // ofpbuf_use_stack(&act, actbuf, sizeof *actbuf);
-        // dp_xf_to_dpif_flow__(dp, ep_ids[i], xf, &key, &mask, &act, f,
-        //                             dump->up.terse);
+        ofpbuf_use_stack(&key, keybuf, sizeof *keybuf);
+        ofpbuf_use_stack(&mask, maskbuf, sizeof *maskbuf);
+        ofpbuf_use_stack(&act, actbuf, sizeof *actbuf);
+        dp_xf_to_dpif_flow__(dp, ep_ids[i], xf, &key, &mask, &act, f,
+                                    dump->up.terse);
     }
 
-    // return n_flows;
-    return 0;
+    return n_flows;
+    // return 0;
 }
 
 static void
@@ -3219,7 +3262,7 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
 
     err = extract_key(dp, &e->header.key, &upcall->packet, buffer); // key will start being append from msg
     if (err) {
-        VLOG_INFO("--- Called: %s error extracting key ----");
+        VLOG_INFO("--- Called: %s error extracting key ----", __func__);
         goto out;
     }
 
@@ -3227,10 +3270,10 @@ xsk_socket_data_to_upcall__(struct dp_xdp *dp, struct ovs_xsk_event *e,
     upcall->key_len = buffer->size - pre_key_len;
     dp_xf_hash(upcall->key, upcall->key_len, &upcall->ufid);
 
-    struct ds dsk = DS_EMPTY_INITIALIZER;
-    xdp_flow_key_format(&dsk, &e->header.key);
+    // struct ds dsk = DS_EMPTY_INITIALIZER;
+    // xdp_flow_key_format(&dsk, &e->header.key);
     // VLOG_INFO("--- Called: %s recv from index: %d, flow key %s ----", __func__, e->header.ifindex, ds_cstr(&dsk));
-    ds_destroy(&dsk);
+    // ds_destroy(&dsk);
 out:
     return err;
 }
@@ -3284,7 +3327,7 @@ xsk_socket_data_to_upcall_userspace(struct dp_xdp *dp, struct ovs_xsk_event *e,
 static int 
 xsk_socket_read(struct xsk_socket_info *xsk, struct ofpbuf *buf, struct pollfd *fds, int n_socks)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     unsigned int rcvd, stock_frames, i;
     uint32_t idx_rx = 0, idx_fq = 0;
     int ret;
@@ -3342,7 +3385,7 @@ static int
 recv_from_socket(struct dp_xdp *dp, struct ovs_xsk_event *e, struct dpif_upcall *upcall, 
         struct ofpbuf *buffer)
 {
-    VLOG_INFO("---- Called: %s ----", __func__);
+    // VLOG_INFO("---- Called: %s ----", __func__);
     // struct ovs_xsk_event *e = buffer->header;
 
     switch (e->header.type) {
@@ -3373,39 +3416,42 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
     int error = EAGAIN;
 
     fat_rwlock_wrlock(&dp->upcall_lock);
-    if (!dp->handlers || handler_id >= dp->n_handlers || dp->n_channels == 0) {
+    if (!dp->handlers || handler_id >= 1 || dp->n_channels == 0) {
         error = EAGAIN;
         goto out;
     }
     handler = &dp->handlers[handler_id];
-    
+    int n_handlers = dp->n_handlers;
+
     if (!(handler->n_events > 0)) {
         int retval = 0;
-        handler->n_events = 0;
-
+        handler->event_offset = handler->n_events = 0;
+       
         retval = poll(handler->fds, dp->n_channels, opt_timeout);
         if (retval < 0) {
             static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
             VLOG_WARN_RL(&rl, "poll failed (%s)", ovs_strerror(errno));
         } else if (retval > 0) {
-            VLOG_INFO("--- %s retval %d ---", __func__, retval);
+            // VLOG_INFO("--- %s retval %d ---", __func__, retval);
             handler->n_events = retval;
         }
     }
     
     int idx = 0;
-    while (handler->n_events > 0 && idx <= dp->n_channels) {
-        if (handler->fds[idx].revents == POLLIN) {
-            // VLOG_INFO("--- %s upcall idx %d ---", __func__, idx);
-            struct dp_channel *ch = &dp->channels[idx];
-            /* NOTE: dpif_recv seems to support one packet at a time, so we should
-             * ensure that we read a packet at a time. */
+    while (handler->n_events > 0 && handler->event_offset < dp->n_channels) {
+        // VLOG_INFO("--- handler->event_offset %d handler->n_events %d ---", handler->event_offset, handler->n_events);
+        if (handler->fds[handler->event_offset].revents == POLLIN) {
+            // VLOG_INFO("--- %s upcall idx %d ---", __func__, handler->event_offset);
+            struct dp_channel *ch = &handler->channels[handler->event_offset];
+            // /* NOTE: dpif_recv seems to support one packet at a time, so we should
+            //  * ensure that we read a packet at a time. */
             if (!ch->sock) {
                 VLOG_INFO("--- %s ch->sock is NULL ---", __func__);
             }
+
             int rcvd = xsk_socket_read(ch->sock, buf, handler->fds, dp->n_handlers);
             if (rcvd <= 0) {
-                idx++;
+                handler->event_offset++;
                 continue;
             }
             handler->n_events -= rcvd;
@@ -3417,17 +3463,17 @@ dpif_xdp_recv(struct dpif *dpif, uint32_t handler_id,
                 VLOG_INFO("---- Called: %s recv_from_socket error %d ----", __func__, error);
                 goto out;
             } else {
-                goto out;
+                goto out; // problem is next time it will start with channel 0
             }
-        } else if (handler->fds[idx].revents == POLLERR || // Cater for implicitly polled events
-                    handler->fds[idx].revents == POLLHUP || 
-                    handler->fds[idx].revents == POLLNVAL) { 
+        } else if (handler->fds[handler->event_offset].revents == POLLERR || // Cater for implicitly polled events
+                    handler->fds[handler->event_offset].revents == POLLHUP || 
+                    handler->fds[handler->event_offset].revents == POLLNVAL) { 
             
             // TODO: Approriately handle the events
             // remove the event
             handler->n_events -= handler->n_events > 0 ? 1 : 0;
         }
-        idx++;
+        handler->event_offset++;
     }
 
 out:

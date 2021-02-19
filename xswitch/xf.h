@@ -13,14 +13,23 @@
 #include <stdbool.h>
 #include <bpf/bpf_endian.h>
 
+#define MAX_FRAME_SIZE 1518
+
+#define SAMPLE_SIZE 64ul // maximum frame size
+// #define SAMPLE_SIZE sizeof(struct xdp_flow_key)
+#define MAX_CPUS 128
+
+# define MAX_PERF_DATA 144
 /* declare maximum number of flows in maps */
-#define MAX_MACRO_FLOWS 250
+#define MAX_MACRO_FLOWS 1000
 #define MAX_MICRO_FLOWS 100
 
 /* Adding the new xf structs and functions */
 #define XFA_MAX_SIZE 24 /* 128 bits */
 #define XFA_BUF_MAX_NUM 4
 #define XFA_BUF_MAX_SIZE (XFA_MAX_SIZE) * XFA_BUF_MAX_NUM
+
+#define UPCALL_COOKIE 0xdead
 
 enum xs_packet_cmd {
     XS_PACKET_CMD_UNSPEC,

@@ -217,7 +217,7 @@ out:
     return error;
 }
 
-int list_upcall_cmd(int argc, char **argv, void *params)
+int list_upcall_flow_cmd(int argc, char **argv, void *params)
 {
     char *description = "Prints out the logs from the datapath. It can print all logs\n\
                         or filter by log level: debug, error, info.";

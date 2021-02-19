@@ -7,6 +7,7 @@
 #include "ctl_datapath.h"
 #include "ctl_logs.h"
 #include "ctl_port.h"
+#include "ctl_upcall.h"
 #include "command.h"
 
 static struct global_flags flags = {
@@ -17,8 +18,10 @@ struct command main_cmds[] = {
     {"flow", "flow [command]", flow_cmd},
     {"port", "port [command]", port_cmd},
     {"logs", "logs [command]", logs_cmd},
+    {"upcall", "upcall [command]", upcall_cmd},
     {0, 0, 0}
 };
+
 
 int main(int argc, char **argv)
 {
@@ -75,6 +78,7 @@ int main(int argc, char **argv)
     {
         if (!strcmp(cmd->name, argv[optind]))
         {   
+            printf("%s \n", cmd->name);
             error = cmd->cmd(argc - optind, &argv[optind], &flags);
             break;
         }

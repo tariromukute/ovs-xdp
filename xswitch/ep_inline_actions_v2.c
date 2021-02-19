@@ -59,33 +59,12 @@ int xdp_ep_inline_actions(struct xdp_md *ctx)
     if (!acts || key.valid & ARP_VALID) /* If there are no flow actions, make an upcall */
     {
         int ret = xdp_upcall_perf(ctx, &key);
-        if (!ret) {
-            // we sent the packet to user space, drop this one
-            action = XDP_DROP;
+        if (ret < 0) {
+            bpf_printk("Upcall failed, index %d rxq %d ret %d\n", ctx->ingress_ifindex, ctx->rx_queue_index, ret);
+            action = XDP_ABORTED;
             goto out;
         }
-
-        bpf_printk("Perf upcall failed, index %d rxq %d ret %d\n", ctx->ingress_ifindex, ctx->rx_queue_index, ret);
-
-        int rxq_index = xdp_upcall(ctx, &key);
-        if (rxq_index < 0) {
-            goto out;
-        }
-        // bpf_printk("Doing upcall index %d rxq %d rr %d\n", ctx->ingress_ifindex, rxq_index, rr);
-        
-        /* NOTE: if you don't put bpf_redirect_map in the program that you load to on the interface
-         * and rather put it in a tail program e.g., bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL)
-         * and you create a xsk_socket for the interface. The xsk_socket seems to be created without an error
-         * but on trying to do xsk_socket__fd(xsk_socket->xsk) you get a segmentation fault. This is resolved
-         * by putting bpf_redirect_map(&xsks_map, index, 0) directly into the program loaded. However, calling
-         * bpf_tail_call(ctx, &tail_table, OVS_ACTION_ATTR_UPCALL) i.e, invoking a tail program that will send
-         * to a xsk_socket, before bpf_redirect_map(&xsks_map, index, 0) will still result in the packets being
-         * delivered, i.e, being sent by the tail program and not the bpf_redirect_map TODO: check the libbpf or 
-         * helper function why this is, it maybe due to some 'enforced' logic that can be changed */
-        if (bpf_map_lookup_elem(&xsks_map, &rr))
-            return bpf_redirect_map(&xsks_map, rr, 0);
-
-        bpf_printk("Upcall failed, index %d rxq %d rr %d\n", ctx->ingress_ifindex, rxq_index, rr);
+        // action = XDP_DROP;
         goto out;
     }
 

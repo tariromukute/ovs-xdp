@@ -128,7 +128,7 @@ static void print_bpf_output(void *ctx, int cpu, void *data, __u32 size)
         __u8  pkt_data[SAMPLE_SIZE];
     } __attribute__((packed)) *e = data;
 
-    list_map_keys();
+    // list_map_keys();
     if (e->cookie == LOG_XF_KEY) {
         printf("========== Logging xf key ============\n");
         struct xf_key key;
@@ -151,6 +151,19 @@ static void print_bpf_output(void *ctx, int cpu, void *data, __u32 size)
         // xdp_flow_key_format(&ds, &key);
         // printf("%s \n", ds_cstr(&ds));
         printf("=================================================\n");
+    } else if (e->cookie == LOG_MACRO_MISS_KEY) {
+        struct xf_upcall *up = e->data;
+        struct ds ds = DS_EMPTY_INITIALIZER;
+        xdp_flow_key_format(&ds, &up->key);
+        printf("Upcall key %s \n", ds_cstr(&ds));
+        ds_destroy(&ds);
+
+        if (true) {
+            printf("pkt len: %-5d bytes. hdr: ", e->pkt_len);
+            for (int i = 0; i < e->pkt_len; i++)
+                printf("%02x ", e->pkt_data[i]);
+            printf("\n");
+        }
     } else if (e->cookie == LOG_DEBUG) {
         printf("%s\n", e->data);
         return;

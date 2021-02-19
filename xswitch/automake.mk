@@ -244,7 +244,9 @@ xswitch_xdp_ctl_SOURCES = \
 	xswitch/ctl_logs.c \
 	xswitch/ctl_logs.h \
 	xswitch/ctl_port.c \
-	xswitch/ctl_port.h
+	xswitch/ctl_port.h \
+	xswitch/ctl_upcall.c \
+	xswitch/ctl_upcall.h
 
 xswitch_xdp_ctl_LDADD = \
 	xswitch/libxswitchuser.la
@@ -258,8 +260,8 @@ xswitch_libxswitch_la_LIBADD = \
 	xswitch/libxswitchuser.la \
 	xswitch/tail_prog.o \
 	xswitch/ep_inline_actions.o \
-	xswitch/ep_tail_actions.o \
-	xswitch/entry-point.o
+	xswitch/ep_inline_actions_v2.o \
+	xswitch/ep_tail_actions.o
 
 lib_LTLIBRARIES += xswitch/libxswitchuser.la
 
@@ -290,7 +292,9 @@ xswitch_libxswitchuser_la_SOURCES = \
 	xswitch/util.h \
 	xswitch/util.c \
 	xswitch/xdp_helpers.h \
-	xswitch/err.h
+	xswitch/err.h \
+	xswitch/net_utils.h \
+	xswitch/net_utils.c
 
 # Build xdp-dispatcher.c from xdp-dispatcher.c.in
 # Adapted the make config from the xdp-tools git repo
@@ -318,6 +322,7 @@ xswitch_libxswitchuser_la_LDFLAGS = \
 XDP_TARGETS = \
 	xswitch/tail_prog \
 	xswitch/ep_inline_actions \
+	xswitch/ep_inline_actions_v2 \
 	xswitch/xs_inline_actions \
 	xswitch/ep_tail_actions \
 	xswitch/ep_pass_action \
@@ -369,6 +374,7 @@ EXTRA_DIST += \
 dist_xswitch_DATA += \
 	xswitch/tail_prog.o \
 	xswitch/ep_inline_actions.o \
+	xswitch/ep_inline_actions_v2.o \
 	xswitch/xs_inline_actions.o \
 	xswitch/ep_tail_actions.o \
 	xswitch/ep_pass_action.o \
@@ -378,10 +384,12 @@ dist_xswitch_DATA += \
 CLEANFILES += \
 	xswitch/tail_prog.ll \
 	xswitch/ep_inline_actions.ll \
+	xswitch/ep_inline_actions_v2.ll \
 	xswitch/xs_inline_actions.ll \
 	xswitch/ep_tail_actions.ll \
 	xswitch/ep_pass_action.ll \
 	xswitch/ep_router_actions.ll \
 	xswitch/xdp-dispatcher.c \
 	xswitch/xdp-loader \
+	xswitch/xdp-ctl \
 	xswitch/stamp-h2
